@@ -3,8 +3,8 @@
     <!-- Default, same as xhdpi -->
     <!-- 320dpi, Amazon Fire TV Stick -->
 
-    <dimen name="card_width">200dp</dimen>
-    <dimen name="card_height">110dp</dimen>
+    <dimen name="card_width">310dp</dimen>
+    <dimen name="card_height">174dp</dimen>
     <!-- text_badge_image_view.xml, default: 12sp -->
     <dimen name="card_badge_text_size">14sp</dimen>
 
@@ -48,11 +48,11 @@
 
     <!-- Decrease Browse fragment content top padding. -->
     <!-- Old value: 167dp -->
-    <dimen name="lb_browse_rows_margin_top">130dp</dimen>
+    <dimen name="lb_browse_rows_margin_top">115dp</dimen>
 
     <!-- Increase this value to hide left strip from Browse fragment (when headers collapsed) -->
     <!-- Old value: 238dp -->
-    <dimen name="lb_browse_rows_margin_start">265dp</dimen>
+    <dimen name="lb_browse_rows_margin_start">64dp</dimen>
 
     <!-- Make search bar more compact so more buttons could be added after it. -->
     <dimen name="lb_search_bar_items_width">600dp</dimen>
@@ -87,16 +87,16 @@
     <!--<item name="lb_search_orb_focused_zoom" type="fraction">120%</item>-->
 
     <!-- MOD: Zoom factor of focused sidebar header (default: 1.2) -->
-    <!--<item format="float" name="lb_browse_header_select_scale" type="dimen">1.2</item>-->
+    <item format="float" name="lb_browse_header_select_scale" type="dimen">1.0</item>
 
     <!--
     Space between cards. Origin: 8dp More info:
     https://stackoverflow.com/questions/32402209/set-margins-between-items-on-browsefragment
     -->
-    <!--<dimen name="lb_browse_item_horizontal_spacing">15dp</dimen>-->
-    <!--<dimen name="lb_browse_item_vertical_spacing">15dp</dimen>-->
-    <dimen name="grid_item_horizontal_spacing">15dp</dimen>
-    <dimen name="grid_item_vertical_spacing">15dp</dimen>
+    <dimen name="lb_browse_item_horizontal_spacing">12dp</dimen>
+    <dimen name="lb_browse_item_vertical_spacing">24dp</dimen>
+    <dimen name="grid_item_horizontal_spacing">12dp</dimen>
+    <dimen name="grid_item_vertical_spacing">24dp</dimen>
     <dimen name="grid_horizontal_margin">25dp</dimen>
 
     <!-- Browse headers spacing. Origin: 21dp -->
@@ -134,4 +134,11 @@
     <dimen name="tooltip_vertical_padding_mod">6.5dp</dimen>
     <dimen name="tooltip_y_offset_non_touch_mod">0dp</dimen>
     <dimen name="tooltip_y_offset_touch_mod">16dp</dimen>
+    <!-- YouTube TV-inspired Home layout -->
+    <dimen name="lb_browse_headers_width">64dp</dimen>
+    <dimen name="yt_search_pill_width">360dp</dimen>
+    <dimen name="yt_search_pill_height">54dp</dimen>
+    <dimen name="yt_title_logo_width">156dp</dimen>
+    <dimen name="yt_title_logo_height">44dp</dimen>
+
 </resources>

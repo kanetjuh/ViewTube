@@ -61,6 +61,8 @@ public class NavigateTitleView extends TitleView implements OnDataChange, Accoun
     private DateTimeView mGlobalClock;
     private DateTimeView mGlobalDate;
     private SearchOrbView mSearchOrbView;
+    private TextView mSearchPill;
+    private TextView mAccountLabel;
     private boolean mInitDone;
     private int mFlags = FULL_VIEW_VISIBLE;
     private int mIconWidth;
@@ -123,8 +125,10 @@ public class NavigateTitleView extends TitleView implements OnDataChange, Accoun
 
     @Override
     protected boolean onRequestFocusInDescendants(int direction, Rect previouslyFocusedRect) {
-        // Gives focus to the SearchOrb first....if not...default to normal descendant focus search
-        return getSearchAffordanceView().requestFocus() || super.onRequestFocusInDescendants(direction, previouslyFocusedRect);
+        // The modern YouTube-like search pill is the most natural first focus target.
+        return (mSearchPill != null && mSearchPill.getVisibility() == View.VISIBLE && mSearchPill.requestFocus()) ||
+                getSearchAffordanceView().requestFocus() ||
+                super.onRequestFocusInDescendants(direction, previouslyFocusedRect);
     }
 
     @Override
@@ -148,30 +152,27 @@ public class NavigateTitleView extends TitleView implements OnDataChange, Accoun
         mBrandingVisibility = (flags & BRANDING_VIEW_VISIBLE) == BRANDING_VIEW_VISIBLE
                 ? View.VISIBLE : View.INVISIBLE;
 
-        if (mIsSearchOrbEnabled) {
-            mSearchOrbView.setVisibility(View.GONE);
+        // Keep the YouTube-style account + mic + search pill visible whenever the title itself is shown.
+        mSearchOrbView.setVisibility(mSearchVisibility);
+        mAccountView.setVisibility(mSearchVisibility);
+        if (mSearchPill != null) {
+            mSearchPill.setVisibility(mSearchVisibility);
         }
 
-        if (mIsAccountViewEnabled) {
-            mAccountView.setVisibility(mSearchVisibility);
+        // These controls are deliberately hidden from the Home title bar.
+        mLanguageView.setVisibility(View.GONE);
+
+        if (mExitPip != null && PlaybackPresenter.instance(getContext()).isRunningInBackground() && mSearchVisibility == View.VISIBLE) {
+            mExitPip.setVisibility(View.VISIBLE);
+            mPipTitle.setVisibility(View.VISIBLE);
+        } else if (mExitPip != null) {
+            mExitPip.setVisibility(View.GONE);
+            mPipTitle.setVisibility(View.GONE);
         }
 
-        if (mIsLanguageViewEnabled) {
-            mLanguageView.setVisibility(mSearchVisibility);
-        }
-
-        if (mExitPip != null && (PlaybackPresenter.instance(getContext()).isRunningInBackground() || mSearchVisibility != View.VISIBLE)) {
-            mExitPip.setVisibility(mSearchVisibility);
-            mPipTitle.setVisibility(mSearchVisibility);
-        }
-
-        if (mIsGlobalClockEnabled) {
-            mGlobalClock.setVisibility(mBrandingVisibility);
-        }
-
-        if (mIsGlobalClockEnabled) {
-            mGlobalDate.setVisibility(mBrandingVisibility);
-        }
+        // The reference UI has branding at the right, not a clock/date block.
+        mGlobalClock.setVisibility(View.GONE);
+        mGlobalDate.setVisibility(View.GONE);
     }
 
     private void init() {
@@ -193,8 +194,13 @@ public class NavigateTitleView extends TitleView implements OnDataChange, Accoun
         MainUIData mainUIData = MainUIData.instance(getContext());
 
         mSearchOrbView = findViewById(R.id.title_orb);
+        mSearchPill = findViewById(R.id.yt_search_pill);
+        if (mSearchPill != null) {
+            mSearchPill.setOnClickListener(v -> mSearchOrbView.performClick());
+        }
 
         mAccountView = findViewById(R.id.account_orb);
+        mAccountLabel = findViewById(R.id.yt_account_label);
         mAccountView.setOnOrbClickedListener(v -> AccountSelectionPresenter.instance(getContext()).nextAccountOrDialog());
         mAccountView.setOnOrbLongClickedListener(v -> {
             AccountSettingsPresenter.instance(getContext()).show();
@@ -226,16 +232,20 @@ public class NavigateTitleView extends TitleView implements OnDataChange, Accoun
     private void updateButtonsVisibility() {
         MainUIData mainUIData = MainUIData.instance(getContext());
 
-        mIsSearchOrbEnabled = !mainUIData.isTopButtonEnabled(MainUIData.TOP_BUTTON_SEARCH);
-        mIsAccountViewEnabled = mainUIData.isTopButtonEnabled(MainUIData.TOP_BUTTON_BROWSE_ACCOUNTS);
-        mIsLanguageViewEnabled = mainUIData.isTopButtonEnabled(MainUIData.TOP_BUTTON_CHANGE_LANGUAGE);
-        mIsGlobalClockEnabled = GeneralData.instance(getContext()).isGlobalClockEnabled();
+        // Home branding is intentionally stable and no longer depends on the old top-button toggles.
+        mIsSearchOrbEnabled = true;
+        mIsAccountViewEnabled = true;
+        mIsLanguageViewEnabled = false;
+        mIsGlobalClockEnabled = false;
 
-        mSearchOrbView.setVisibility(mIsSearchOrbEnabled ? View.VISIBLE : View.GONE);
-        mAccountView.setVisibility(mIsAccountViewEnabled ? View.VISIBLE : View.GONE);
-        mLanguageView.setVisibility(mIsLanguageViewEnabled ? View.VISIBLE : View.GONE);
-        mGlobalClock.setVisibility(mIsGlobalClockEnabled ? View.VISIBLE : View.GONE);
-        mGlobalDate.setVisibility(mIsGlobalClockEnabled ? View.VISIBLE : View.GONE);
+        mSearchOrbView.setVisibility(View.VISIBLE);
+        mAccountView.setVisibility(View.VISIBLE);
+        if (mSearchPill != null) {
+            mSearchPill.setVisibility(View.VISIBLE);
+        }
+        mLanguageView.setVisibility(View.GONE);
+        mGlobalClock.setVisibility(View.GONE);
+        mGlobalDate.setVisibility(View.GONE);
 
         Utils.postDelayed(this::updateAccountIcon, 1_000); // give a time to engine to fetch an updated icon url
         //updateAccountIcon();
@@ -290,11 +300,18 @@ public class NavigateTitleView extends TitleView implements OnDataChange, Accoun
             String accountName = current.getName() != null ? current.getName() : current.getEmail();
             //TooltipCompatHandler.setTooltipText(mAccountView, Utils.updateTooltip(getContext(), accountName));
             TooltipCompatHandler.setTooltipText(mAccountView, accountName);
+            if (mAccountLabel != null) {
+                mAccountLabel.setText(accountName != null ? accountName : "");
+            }
         } else {
             Colors orbColors = mAccountView.getOrbColors();
             mAccountView.setOrbColors(new Colors(orbColors.color, orbColors.brightColor, ContextCompat.getColor(getContext(), R.color.orb_icon_color)));
             mAccountView.setOrbIcon(ContextCompat.getDrawable(getContext(), R.drawable.browse_title_account));
-            TooltipCompatHandler.setTooltipText(mAccountView, getContext().getString(R.string.dialog_account_none));
+            String noAccount = getContext().getString(R.string.dialog_account_none);
+            TooltipCompatHandler.setTooltipText(mAccountView, noAccount);
+            if (mAccountLabel != null) {
+                mAccountLabel.setText(noAccount);
+            }
         }
     }
 

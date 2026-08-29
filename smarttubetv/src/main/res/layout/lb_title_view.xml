@@ -1,92 +1,114 @@
 <?xml version="1.0" encoding="utf-8"?>
-
-<!-- MOD: add custom widgets to the title -->
-
-<!--
-     Copyright (C) 2014 The Android Open Source Project
-
-     Licensed under the Apache License, Version 2.0 (the "License");
-     you may not use this file except in compliance with the License.
-     You may obtain a copy of the License at
-
-          http://www.apache.org/licenses/LICENSE-2.0
-
-     Unless required by applicable law or agreed to in writing, software
-     distributed under the License is distributed on an "AS IS" BASIS,
-     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-     See the License for the specific language governing permissions and
-     limitations under the License.
--->
+<!-- YouTube-TV-style title bar: account group lives on the rail axis; mic/search live on the content axis. -->
 <merge xmlns:android="http://schemas.android.com/apk/res/android"
        xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <include layout="@layout/lb_title_view_logo"/>
+    <include layout="@layout/lb_title_view_logo" />
 
-    <!-- MOD: add additional buttons -->
-    <LinearLayout android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:orientation="horizontal"
-                  android:layout_gravity="center_vertical|start">
-        <androidx.leanback.widget.SearchOrbView
-            android:id="@+id/title_orb"
-            android:layout_height="wrap_content"
-            android:layout_width="wrap_content"
-            android:transitionGroup="true"
-            android:layout_gravity="center_vertical|start"
-            android:nextFocusRight="@id/account_orb"
-            android:visibility="invisible" />
+    <FrameLayout
+        android:id="@+id/yt_top_controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical|start"
+        android:clipChildren="false"
+        android:clipToPadding="false">
 
-        <com.liskovsoft.smartyoutubetv2.tv.ui.widgets.search.LongClickSearchOrbView
-            android:id="@+id/account_orb"
+        <LinearLayout
+            android:id="@+id/yt_account_controls"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:transitionGroup="true"
-            android:layout_marginStart="@dimen/search_bar_right_items_margin"
-            android:nextFocusLeft="@id/title_orb"
-            android:nextFocusRight="@id/language_orb"
-            app:searchOrbIcon="@drawable/browse_title_account"
-            app:searchOrbColor="@color/orb_color"
-            app:searchOrbBrightColor="@color/orb_bright_color"
-            app:searchOrbIconColor="@color/orb_icon_color"
-            android:visibility="gone" />
+            android:layout_gravity="start|center_vertical"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
+            <com.liskovsoft.smartyoutubetv2.tv.ui.widgets.search.LongClickSearchOrbView
+                android:id="@+id/account_orb"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:nextFocusRight="@id/title_orb"
+                android:transitionGroup="true"
+                android:visibility="visible"
+                app:searchOrbBrightColor="@color/yt_top_control_focused"
+                app:searchOrbColor="@color/yt_top_control_bg"
+                app:searchOrbIcon="@drawable/browse_title_account"
+                app:searchOrbIconColor="@color/orb_icon_color" />
+
+            <TextView
+                android:id="@+id/yt_account_label"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/yt_search_pill_height"
+                android:paddingStart="8dp"
+                android:alpha="0"
+                android:ellipsize="end"
+                android:gravity="center_vertical|start"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:textColor="#FFF1F1F1"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/yt_search_controls"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="start|center_vertical"
+            android:layout_marginStart="96dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <androidx.leanback.widget.SearchOrbView
+                android:id="@+id/title_orb"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:nextFocusLeft="@id/account_orb"
+                android:nextFocusRight="@id/yt_search_pill"
+                android:transitionGroup="true"
+                android:visibility="visible"
+                app:searchOrbBrightColor="@color/yt_top_control_focused"
+                app:searchOrbColor="@color/yt_top_control_bg"
+                app:searchOrbIcon="@drawable/yt_mic"
+                app:searchOrbIconColor="@color/orb_icon_color" />
+
+            <TextView
+                android:id="@+id/yt_search_pill"
+                android:layout_width="@dimen/yt_search_pill_width"
+                android:layout_height="@dimen/yt_search_pill_height"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/yt_search_pill_selector"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical|start"
+                android:includeFontPadding="false"
+                android:nextFocusLeft="@id/title_orb"
+                android:paddingStart="22dp"
+                android:paddingEnd="22dp"
+                android:text="Search"
+                android:textColor="#FFD8D8D8"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- IDs kept because NavigateTitleView expects them. They are intentionally hidden. -->
         <androidx.leanback.widget.SearchOrbView
             android:id="@+id/language_orb"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:transitionGroup="true"
-            android:layout_marginStart="@dimen/search_bar_right_items_margin"
-            android:nextFocusLeft="@id/account_orb"
-            android:nextFocusRight="@id/exit_pip"
-            app:searchOrbIcon="@drawable/search_bar_language_orb"
-            app:searchOrbColor="@color/orb_color"
-            app:searchOrbBrightColor="@color/orb_bright_color"
-            app:searchOrbIconColor="@color/orb_icon_color"
-            android:visibility="gone" />
+            android:visibility="gone"
+            app:searchOrbIcon="@drawable/search_bar_language_orb" />
 
         <androidx.leanback.widget.SearchOrbView
             android:id="@+id/exit_pip"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:transitionGroup="true"
-            android:layout_marginStart="@dimen/search_bar_right_items_margin"
-            android:nextFocusLeft="@id/language_orb"
-            app:searchOrbIcon="@drawable/browse_title_pip"
-            app:searchOrbColor="@color/orb_color"
-            app:searchOrbBrightColor="@color/orb_bright_color"
-            app:searchOrbIconColor="@color/orb_icon_color"
-            android:visibility="gone" />
+            android:visibility="gone"
+            app:searchOrbIcon="@drawable/browse_title_pip" />
 
         <com.liskovsoft.smartyoutubetv2.tv.ui.widgets.marqueetextviewcompat.TitleMarqueeTextViewCompat
             android:id="@+id/pip_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="@dimen/search_bar_right_items_margin"
-            android:layout_gravity="center_vertical"
-            android:maxWidth="@dimen/pip_title_max_width"
-            android:textSize="@dimen/pip_title_size"
-            style="?attr/browseTitleTextStyle"
-            android:ellipsize="marquee"
             android:visibility="gone" />
-    </LinearLayout>
+    </FrameLayout>
 </merge>

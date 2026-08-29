@@ -1,28 +1,81 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.leanback.widget.NonOverlappingLinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  YouTube-style navigation row.
+
+  IMPORTANT: the collapsed rail is 64dp wide. The icon therefore lives in its own
+  fixed 64dp slot and is centered inside that slot. Labels live outside that slot
+  and are only faded in when BrowseFragment expands the rail.
+
+  This avoids the previous layout where margins + horizontal padding + the 22dp icon
+  already required 72dp before the label was even considered, which caused the
+  right side of several icons to be clipped by the 64dp collapsed rail.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="horizontal">
+    android:layout_height="42dp"
+    android:clipChildren="false"
+    android:clipToPadding="false">
 
-    <ImageView
-        android:id="@+id/header_icon"
-        android:layout_width="32dp"
-        android:layout_height="32dp"
-        android:contentDescription="@string/header_icon" />
+    <!-- Focus surface. Transparent until this row receives focus. -->
+    <View
+        android:id="@+id/header_surface"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:layout_gravity="center_vertical"
+        android:layout_marginStart="6dp"
+        android:layout_marginEnd="8dp"
+        android:background="@drawable/yt_nav_item_focus"
+        android:duplicateParentState="true" />
 
+    <!--
+      Fixed collapsed icon column. Never add horizontal padding/margins to this slot:
+      its center (32dp) is also what BrowseFragment uses to align the account orb.
+    -->
+    <FrameLayout
+        android:id="@+id/header_icon_slot"
+        android:layout_width="64dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start|center_vertical"
+        android:clipChildren="false"
+        android:clipToPadding="false">
+
+        <ImageView
+            android:id="@+id/header_icon"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_gravity="center"
+            android:contentDescription="@string/header_icon"
+            android:duplicateParentState="true"
+            android:scaleType="fitCenter" />
+    </FrameLayout>
+
+    <!-- Starts just to the right of the 64dp icon column. BrowseFragment handles fade/slide. -->
     <com.liskovsoft.smartyoutubetv2.tv.ui.widgets.marqueetextviewcompat.HeaderMarqueeTextViewCompat
         android:id="@+id/header_label"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="3dp"
-        android:layout_marginStart="10dp"
-
+        android:layout_gravity="start|center_vertical"
+        android:layout_marginStart="72dp"
+        android:alpha="0"
+        android:duplicateParentState="true"
+        android:ellipsize="end"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:maxWidth="136dp"
         android:singleLine="true"
-        android:maxWidth="150sp"
-        android:marqueeRepeatLimit="marquee_forever"
-        android:ellipsize="marquee"
-        android:scrollHorizontally="true"
+        android:textColor="#FFFFFFFF"
+        android:textSize="17sp"
+        android:textStyle="bold"
+        android:translationX="-8dp" />
 
-        style="@style/TextAppearance.Leanback.Header"/>
-</androidx.leanback.widget.NonOverlappingLinearLayout>
+    <View
+        android:id="@+id/header_divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="12dp"
+        android:alpha="0"
+        android:background="#4AFFFFFF"
+        android:visibility="gone" />
+</FrameLayout>

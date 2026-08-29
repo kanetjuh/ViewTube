@@ -91,7 +91,9 @@ public abstract class MultipleRowsFragment extends RowsSupportFragment implement
 
         if (mRowsAdapter == null) {
             mRowPresenter = new CustomListRowPresenter();
-            mRowPresenter.enableChildRoundedCorners(getMainUIData().isUiTweakEnabled(MainUIData.UI_TWEAK_ROUNDED_CORNERS));
+            // The custom YouTube card clips only its thumbnail. Leanback child rounding adds an
+            // extra wrapper/outline and can create a dark rounded info block under selected cards.
+            mRowPresenter.enableChildRoundedCorners(false);
 
             ClassPresenterSelector presenterSelector = new ClassPresenterSelector();
             presenterSelector.addClassPresenter(ListRow.class, mRowPresenter);

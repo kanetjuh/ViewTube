@@ -45,7 +45,9 @@ public class IconHeaderItemPresenter extends RowHeaderPresenter {
         mDefaultIcon = new ColorDrawable(ContextCompat.getColor(viewGroup.getContext(), R.color.lb_grey));
 
         View view = inflater.inflate(R.layout.icon_header_item, null);
-        view.setAlpha(mUnselectedAlpha); // Initialize icons to be at half-opacity.
+        // YouTube-style rail: the icon column must stay fully opaque even when the row is not selected.
+        // Collapsed/expanded transparency belongs to the rail background only, never to its children.
+        view.setAlpha(1.0f);
 
         return new ViewHolder(view);
     }
@@ -62,9 +64,11 @@ public class IconHeaderItemPresenter extends RowHeaderPresenter {
 
         View rootView = viewHolder.view;
         rootView.setFocusable(true);
+        rootView.setAlpha(1.0f);
 
         ImageView iconView = rootView.findViewById(R.id.header_icon);
         if (iconView != null) {
+            iconView.setAlpha(1.0f);
             if (mIconUrl != null) {
                 Glide.with(rootView.getContext())
                         .load(mIconUrl)
@@ -94,8 +98,15 @@ public class IconHeaderItemPresenter extends RowHeaderPresenter {
     // mUnselectAlpha, and also assumes the xml inflation will return a RowHeaderView.
     @Override
     protected void onSelectLevelChanged(RowHeaderPresenter.ViewHolder holder) {
-        holder.view.setAlpha(mUnselectedAlpha + holder.getSelectLevel() *
-                (1.0f - mUnselectedAlpha));
+        // Do not let Leanback dim the complete header row. Doing so also fades the icon,
+        // which makes the collapsed rail look transparent. Selection is already communicated
+        // by the focus surface, so the navigation icon itself stays at full brightness.
+        holder.view.setAlpha(1.0f);
+
+        ImageView iconView = holder.view.findViewById(R.id.header_icon);
+        if (iconView != null) {
+            iconView.setAlpha(1.0f);
+        }
     }
 
     private final RequestListener<Drawable> mErrorListener = new RequestListener<Drawable>() {

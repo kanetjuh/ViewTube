@@ -1,12 +1,18 @@
 package com.liskovsoft.smartyoutubetv2.tv.ui.browse;
 
-import android.graphics.drawable.Drawable;
+import android.animation.ArgbEvaluator;
+import android.animation.ValueAnimator;
+import android.graphics.Color;
+import android.graphics.Rect;
+import android.graphics.PorterDuff;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewGroup.MarginLayoutParams;
+import android.view.ViewParent;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -15,12 +21,14 @@ import androidx.fragment.app.FragmentTransaction;
 import androidx.leanback.app.BrowseSupportFragment;
 import androidx.leanback.app.HeadersSupportFragment;
 import androidx.leanback.widget.ArrayObjectAdapter;
+import androidx.leanback.widget.BrowseFrameLayout;
 import androidx.leanback.widget.HeaderItem;
 import androidx.leanback.widget.ListRowPresenter;
 import androidx.leanback.widget.PageRow;
 import androidx.leanback.widget.Presenter;
 import androidx.leanback.widget.PresenterSelector;
 import androidx.leanback.widget.TitleHelper;
+import androidx.leanback.widget.VerticalGridView;
 import com.liskovsoft.sharedutils.helpers.Helpers;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.BrowseSection;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.SettingsGroup;
@@ -29,7 +37,6 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.data.VideoGroup;
 import com.liskovsoft.smartyoutubetv2.common.app.models.errors.ErrorFragmentData;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.BrowsePresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.SearchPresenter;
-import com.liskovsoft.smartyoutubetv2.common.app.presenters.SplashPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.views.BrowseView;
 import com.liskovsoft.smartyoutubetv2.common.misc.CrashRestorer;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
@@ -55,7 +62,24 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
     private ProgressBarManager mProgressBarManager;
     private boolean mIsFragmentCreated;
     private boolean mFocusOnContent;
+    private boolean mSyncingRailSelection;
+    private boolean mRailExpanded;
+    private ValueAnimator mRailWidthAnimator;
+    private ValueAnimator mRailColorAnimator;
+    private ValueAnimator mAccountLabelWidthAnimator;
+    private Integer mContentAnchorInsetPx;
     private CrashRestorer mCrashRestorer;
+
+    // The icon slot itself is still 64dp (icon_header_item.xml). The translucent surface is wider,
+    // like YouTube TV: it extends past the icon center and covers the outgoing card sliver.
+    private static final int RAIL_COLLAPSED_FALLBACK_DP = 96;
+    private static final int RAIL_EXPANDED_DP = 220;
+    private static final int RAIL_ANIMATION_MS = 165;
+    private static final int RAIL_COLLAPSED_COLOR = 0xD0141414; // ~82%: fuller than v11, still lets a small content sliver show through
+    private static final int RAIL_EXPANDED_COLOR = 0xFF0F0F0F;
+    private static final int CONTENT_COLLAPSED_OFFSET_DP = -8; // only a tiny YouTube-style underlap, never half a card
+    private static final int CONTENT_EXPANDED_OFFSET_DP = RAIL_EXPANDED_DP - RAIL_COLLAPSED_FALLBACK_DP; // 124dp: keep the same content edge when rail expands
+    private static final int TOPBAR_AFTER_RAIL_GAP_DP = 12;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -95,6 +119,7 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
         View root = super.onCreateView(inflater, container, savedInstanceState);
 
         mProgressBarManager.setRootView((ViewGroup) root);
+        installPermanentRailFocusBehavior(root);
 
         return root;
     }
@@ -104,6 +129,16 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
         super.onActivityCreated(savedInstanceState);
 
         setupEventListeners();
+        keepHeaderRailVisible();
+        setRailExpanded(false, false);
+        mHandler.postDelayed(() -> {
+            keepHeaderRailVisible();
+            setRailExpanded(false, false);
+        }, 120);
+        mHandler.postDelayed(() -> {
+            keepHeaderRailVisible();
+            setRailExpanded(false, false);
+        }, 500);
 
         prepareEntranceTransition();
 
@@ -123,18 +158,46 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
     }
 
     private void setupEventListeners() {
+        getHeadersSupportFragment().setOnHeaderViewSelectedListener(
+                (viewHolder, row) -> {
+                    if (row == null || mSyncingRailSelection) {
+                        return;
+                    }
+
+                    int newPosition = getHeadersSupportFragment().getSelectedPosition();
+                    if (newPosition < 0 || newPosition >= mSectionRowAdapter.size()) {
+                        return;
+                    }
+
+                    if (getSelectedPosition() != newPosition) {
+                        mSyncingRailSelection = true;
+                        try {
+                            setSelectedPosition(newPosition, false);
+                        } finally {
+                            mSyncingRailSelection = false;
+                        }
+                    }
+
+                    HeaderItem headerItem = row.getHeaderItem();
+                    if (headerItem != null) {
+                        mBrowsePresenter.onSectionFocused((int) headerItem.getId());
+                    }
+
+                    keepHeaderRailVisible();
+                    applyRailItemVisuals(mRailExpanded, false);
+                }
+        );
+
         getHeadersSupportFragment().setOnHeaderClickedListener(
                 (viewHolder, row) -> {
                     long headerId = row.getHeaderItem().getId();
                     int newPosition = indexOf(headerId);
 
                     if (getHeadersSupportFragment().getSelectedPosition() != newPosition) {
-                        // touch screen support
                         getHeadersSupportFragment().setSelectedPosition(newPosition);
                     } else {
-                        // update section when clicked or pressed
                         mBrowsePresenter.onSectionFocused((int) headerId);
-                        startHeadersTransitionSafe(false);
+                        focusOnContent();
                     }
                 }
         );
@@ -186,10 +249,9 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
         }
 
         setHeadersState(HEADERS_ENABLED);
-        setHeadersTransitionOnBackEnabled(true);
+        setHeadersTransitionOnBackEnabled(false);
 
         int brandColorRes = Helpers.getThemeAttr(getContext(), R.attr.brandColor);
-        int brandAccentColorRes = Helpers.getThemeAttr(getContext(), R.attr.brandAccentColor);
 
         updateBadge();
 
@@ -197,10 +259,12 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
         //setTitle(getString(R.string.browse_title));
 
         // Set fastLane (or headers) background color
-        setBrandColor(ContextCompat.getColor(getContext(), brandColorRes));
+        // The rail draws its own surface. Keeping Leanback's brand layer transparent prevents
+        // the "double sidebar" effect (a second dark strip behind the rail).
+        setBrandColor(Color.TRANSPARENT);
 
         // Set search icon color.
-        setSearchAffordanceColor(ContextCompat.getColor(getContext(), brandAccentColorRes));
+        setSearchAffordanceColor(ContextCompat.getColor(getContext(), R.color.yt_top_control_bg));
 
         setHeaderPresenterSelector(new PresenterSelector() {
             private final Map<Integer, Presenter> mPresenterMap = new HashMap<>();
@@ -343,10 +407,612 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
 
     @Override
     public void focusOnContent() {
-        startHeadersTransitionSafe(false);
         if (getMainFragment() != null && getMainFragment().getView() != null) {
             getMainFragment().getView().requestFocus();
         }
+        keepHeaderRailVisible();
+        setRailExpanded(false, true);
+    }
+
+    /**
+     * The stock Leanback layout wraps HeadersSupportFragment in browse_headers_dock and gives that
+     * dock 50dp end-padding "for shadow". Earlier sidebar patches resized/painted only the child
+     * HeadersSupportFragment. That left the 50dp dock as a second visual/geometry layer, which is
+     * exactly the strip visible over/next to the icons in the screenshots.
+     *
+     * Fix: the DOCK is now the single owner of sidebar width/background. Its stock shadow padding is
+     * removed. The child header fragment always fills the dock and stays transparent. Collapsed =
+     * transparent icon rail. Expanded = one dark panel. No second slab, no guessed orb-width surface.
+     */
+    private void keepHeaderRailVisible() {
+        HeadersSupportFragment headersFragment = getHeadersSupportFragment();
+        View headersView = headersFragment != null ? headersFragment.getView() : null;
+        View headersDock = getHeadersDock();
+        if (headersView == null || headersDock == null) {
+            return;
+        }
+
+        headersView.animate().cancel();
+        headersView.setVisibility(View.VISIBLE);
+        headersView.setAlpha(1f);
+        headersView.setTranslationX(0f);
+        headersView.setBackgroundColor(Color.TRANSPARENT);
+
+        // Remove Leanback's built-in 50dp end padding from browse_headers_dock. That padding is for
+        // stock header shadows and must not exist in an overlay navigation rail.
+        headersDock.setPadding(0, headersDock.getPaddingTop(), 0, headersDock.getPaddingBottom());
+        headersDock.setVisibility(View.VISIBLE);
+        headersDock.setAlpha(1f);
+        headersDock.setTranslationX(0f);
+        headersDock.setBackgroundColor(mRailExpanded ? RAIL_EXPANDED_COLOR : RAIL_COLLAPSED_COLOR);
+
+        ViewGroup.LayoutParams dockRaw = headersDock.getLayoutParams();
+        if (dockRaw instanceof MarginLayoutParams) {
+            MarginLayoutParams dockParams = (MarginLayoutParams) dockRaw;
+            dockParams.setMarginStart(0);
+            dockParams.setMarginEnd(0);
+            dockParams.width = mRailExpanded ? dp(RAIL_EXPANDED_DP) : getCollapsedRailWidthPx();
+            headersDock.setLayoutParams(dockParams);
+        } else if (dockRaw != null) {
+            dockRaw.width = mRailExpanded ? dp(RAIL_EXPANDED_DP) : getCollapsedRailWidthPx();
+            headersDock.setLayoutParams(dockRaw);
+        }
+
+        if (headersDock instanceof ViewGroup) {
+            ViewGroup dockGroup = (ViewGroup) headersDock;
+            dockGroup.setClipChildren(false);
+            dockGroup.setClipToPadding(false);
+        }
+
+        // The fragment view never paints a second sidebar surface. It just fills the dock.
+        ViewGroup.LayoutParams headerRaw = headersView.getLayoutParams();
+        if (headerRaw != null) {
+            headerRaw.width = ViewGroup.LayoutParams.MATCH_PARENT;
+            headersView.setLayoutParams(headerRaw);
+        }
+        headersView.setPadding(0, headersView.getPaddingTop(), 0, headersView.getPaddingBottom());
+        if (headersView instanceof ViewGroup) {
+            ((ViewGroup) headersView).setClipChildren(false);
+        }
+
+        VerticalGridView rail = headersFragment.getVerticalGridView();
+        if (rail != null) {
+            ViewGroup.LayoutParams railParams = rail.getLayoutParams();
+            if (railParams != null) {
+                railParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
+                rail.setLayoutParams(railParams);
+            }
+
+            rail.setChildrenVisibility(View.VISIBLE);
+            rail.setFocusSearchDisabled(false);
+            rail.setClipChildren(false);
+            rail.setClipToPadding(false);
+            rail.setPadding(0, rail.getPaddingTop(), 0, rail.getPaddingBottom());
+            rail.setVerticalSpacing(dp(2));
+            rail.setBackgroundColor(Color.TRANSPARENT);
+            rail.setAlpha(1f);
+        }
+
+        applyRailItemVisuals(mRailExpanded, false);
+
+        // Title bar lives in a separate Leanback container. Re-align both axes after every rail
+        // layout pass: account orb to the icon column, mic/search to the actual content/card start.
+        headersDock.post(() -> {
+            alignAccountOrbToRail();
+            alignSearchControlsToContent(mRailExpanded, false);
+        });
+    }
+
+    private View getHeadersDock() {
+        View root = getView();
+        return root != null ? root.findViewById(R.id.browse_headers_dock) : null;
+    }
+
+    private View getContentDock() {
+        View root = getView();
+        return root != null ? root.findViewById(R.id.browse_container_dock) : null;
+    }
+
+    /**
+     * YouTube-style behavior:
+     * - collapsed icon rail is a translucent overlay: content is pulled left underneath it, so
+     *   thumbnails/rows remain faintly visible behind the icons like the YouTube TV rail;
+     * - expanded navigation is a real opaque panel: content slides right to clear the full menu,
+     *   so cards/row titles never remain underneath the expanded navigation.
+     */
+    private void setMainContentOffset(boolean expanded, boolean animate) {
+        View contentDock = getContentDock();
+        if (contentDock == null) {
+            return;
+        }
+
+        float targetTranslationX = expanded ? dp(CONTENT_EXPANDED_OFFSET_DP) : dp(CONTENT_COLLAPSED_OFFSET_DP);
+        contentDock.animate().cancel();
+
+        if (animate) {
+            contentDock.animate()
+                    .translationX(targetTranslationX)
+                    .setDuration(RAIL_ANIMATION_MS)
+                    .start();
+        } else {
+            contentDock.setTranslationX(targetTranslationX);
+        }
+    }
+
+    /**
+     * Account/avatar group follows the navigation icon axis. Search controls are deliberately a
+     * separate group and follow the content/card axis instead.
+     */
+    private void alignAccountOrbToRail() {
+        View root = getView();
+        HeadersSupportFragment headersFragment = getHeadersSupportFragment();
+        if (root == null || headersFragment == null) {
+            return;
+        }
+
+        View accountControls = root.findViewById(R.id.yt_account_controls);
+        View accountOrb = root.findViewById(R.id.account_orb);
+        VerticalGridView rail = headersFragment.getVerticalGridView();
+        if (accountControls == null || accountOrb == null || rail == null || rail.getChildCount() == 0 ||
+                accountOrb.getWidth() == 0) {
+            return;
+        }
+
+        View firstHeader = rail.getChildAt(0);
+        View headerIcon = firstHeader != null ? firstHeader.findViewById(R.id.header_icon) : null;
+        if (headerIcon == null || headerIcon.getWidth() == 0) {
+            return;
+        }
+
+        int[] accountLocation = new int[2];
+        int[] iconLocation = new int[2];
+        accountOrb.getLocationOnScreen(accountLocation);
+        headerIcon.getLocationOnScreen(iconLocation);
+
+        float accountCenterX = accountLocation[0] + accountOrb.getWidth() / 2f;
+        float iconCenterX = iconLocation[0] + headerIcon.getWidth() / 2f;
+        float deltaX = iconCenterX - accountCenterX;
+
+        if (Math.abs(deltaX) >= 0.5f) {
+            accountControls.setTranslationX(accountControls.getTranslationX() + deltaX);
+        }
+    }
+
+    /**
+     * Expanded rail: show the selected YouTube account/channel name beside the avatar. The mic/search
+     * group is positioned independently on the exact content/card start. Collapsed rail: hide the
+     * account name again while keeping mic/search aligned with the normal content start.
+     */
+    private void syncTopBarWithRail(boolean expanded, boolean animate) {
+        View root = getView();
+        View headersDock = getHeadersDock();
+        if (root == null || headersDock == null) {
+            return;
+        }
+
+        View accountLabel = root.findViewById(R.id.yt_account_label);
+        View accountOrb = root.findViewById(R.id.account_orb);
+        if (accountLabel == null || accountOrb == null) {
+            return;
+        }
+
+        // Do this after the rail width/layout pass so all screen coordinates are real.
+        headersDock.post(() -> {
+            alignAccountOrbToRail();
+
+            int currentLabelWidth = accountLabel.getWidth();
+            int targetLabelWidth = 0;
+            if (expanded) {
+                int[] dockLocation = new int[2];
+                int[] accountLocation = new int[2];
+                headersDock.getLocationOnScreen(dockLocation);
+                accountOrb.getLocationOnScreen(accountLocation);
+                int labelStart = accountLocation[0] + accountOrb.getWidth() + dp(8);
+                int labelEnd = dockLocation[0] + dp(RAIL_EXPANDED_DP) - dp(12);
+                targetLabelWidth = Math.max(0, labelEnd - labelStart);
+            }
+
+            if (mAccountLabelWidthAnimator != null) {
+                mAccountLabelWidthAnimator.cancel();
+            }
+            accountLabel.animate().cancel();
+
+            if (expanded) {
+                accountLabel.setVisibility(View.VISIBLE);
+            }
+
+            ViewGroup.LayoutParams params = accountLabel.getLayoutParams();
+            if (params != null) {
+                if (!animate) {
+                    params.width = targetLabelWidth;
+                    accountLabel.setLayoutParams(params);
+                    accountLabel.setAlpha(expanded ? 1f : 0f);
+                    if (!expanded) {
+                        accountLabel.setVisibility(View.GONE);
+                    }
+                } else {
+                    int startWidth = currentLabelWidth;
+                    mAccountLabelWidthAnimator = ValueAnimator.ofInt(startWidth, targetLabelWidth);
+                    mAccountLabelWidthAnimator.setDuration(RAIL_ANIMATION_MS);
+                    mAccountLabelWidthAnimator.addUpdateListener(animation -> {
+                        ViewGroup.LayoutParams lp = accountLabel.getLayoutParams();
+                        if (lp != null) {
+                            lp.width = (int) animation.getAnimatedValue();
+                            accountLabel.setLayoutParams(lp);
+                        }
+                    });
+                    mAccountLabelWidthAnimator.start();
+
+                    accountLabel.animate()
+                            .alpha(expanded ? 1f : 0f)
+                            .setDuration(expanded ? 150 : 100)
+                            .withEndAction(() -> {
+                                if (!expanded) {
+                                    accountLabel.setVisibility(View.GONE);
+                                }
+                            })
+                            .start();
+                }
+            }
+
+            // Microphone + Search are a separate group now. Their left edge tracks the exact
+            // content/card anchor in both states, so the mic starts where row titles/cards start.
+            alignSearchControlsToContent(expanded, animate);
+        });
+    }
+
+    private void alignSearchControlsToContent(boolean expanded, boolean animate) {
+        View root = getView();
+        View contentDock = getContentDock();
+        if (root == null || contentDock == null) {
+            return;
+        }
+
+        View searchControls = root.findViewById(R.id.yt_search_controls);
+        if (searchControls == null || searchControls.getWidth() == 0) {
+            return;
+        }
+
+        if (mContentAnchorInsetPx == null) {
+            View mainFragmentView = getMainFragment() != null ? getMainFragment().getView() : null;
+            View anchor = mainFragmentView != null ? findFirstContentAnchor(mainFragmentView) : null;
+            if (anchor != null && anchor.getWidth() > 0) {
+                int[] anchorLocation = new int[2];
+                int[] dockLocation = new int[2];
+                anchor.getLocationOnScreen(anchorLocation);
+                contentDock.getLocationOnScreen(dockLocation);
+                mContentAnchorInsetPx = Math.max(0, anchorLocation[0] - dockLocation[0]);
+            }
+        }
+
+        int inset = mContentAnchorInsetPx != null ? mContentAnchorInsetPx : dp(72);
+        int[] dockLocation = new int[2];
+        int[] searchLocation = new int[2];
+        contentDock.getLocationOnScreen(dockLocation);
+        searchControls.getLocationOnScreen(searchLocation);
+
+        float baseDockX = dockLocation[0] - contentDock.getTranslationX();
+        float targetContentTranslation = expanded ? dp(CONTENT_EXPANDED_OFFSET_DP) : dp(CONTENT_COLLAPSED_OFFSET_DP);
+        float targetSearchX = baseDockX + targetContentTranslation + inset;
+        float delta = targetSearchX - searchLocation[0];
+        float targetTranslation = searchControls.getTranslationX() + delta;
+
+        searchControls.animate().cancel();
+        if (animate) {
+            searchControls.animate()
+                    .translationX(targetTranslation)
+                    .setDuration(RAIL_ANIMATION_MS)
+                    .start();
+        } else {
+            searchControls.setTranslationX(targetTranslation);
+        }
+    }
+
+    private View findFirstContentAnchor(View root) {
+        if (root == null || root.getVisibility() != View.VISIBLE) {
+            return null;
+        }
+        if (root.getId() == R.id.yt_thumbnail_shell && root.getWidth() > 0) {
+            return root;
+        }
+        if (root instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) root;
+            View best = null;
+            int bestX = Integer.MAX_VALUE;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View candidate = findFirstContentAnchor(group.getChildAt(i));
+                if (candidate != null) {
+                    int[] location = new int[2];
+                    candidate.getLocationOnScreen(location);
+                    // Ignore cards that are already mostly scrolled off screen to the left.
+                    if (location[0] >= -dp(24) && location[0] < bestX) {
+                        best = candidate;
+                        bestX = location[0];
+                    }
+                }
+            }
+            return best;
+        }
+        return null;
+    }
+
+    /**
+     * Collapsed surface is deliberately wider than the 64dp icon slot. This matches YouTube TV: the
+     * translucent rail ends just before the card keyline, so the previous card disappears *under*
+     * the rail rather than leaving an exposed strip beside it. The content itself still only moves
+     * by the tiny 8dp underlap configured above.
+     */
+    private int getCollapsedRailWidthPx() {
+        return dp(RAIL_COLLAPSED_FALLBACK_DP);
+    }
+
+    private void setRailExpanded(boolean expanded, boolean animate) {
+        View headersDock = getHeadersDock();
+        if (headersDock == null) {
+            mRailExpanded = expanded;
+            setMainContentOffset(expanded, animate);
+            syncTopBarWithRail(expanded, animate);
+            return;
+        }
+
+        int targetWidth = expanded ? dp(RAIL_EXPANDED_DP) : getCollapsedRailWidthPx();
+        int targetColor = expanded ? RAIL_EXPANDED_COLOR : RAIL_COLLAPSED_COLOR;
+
+        if (mRailWidthAnimator != null) {
+            mRailWidthAnimator.cancel();
+        }
+        if (mRailColorAnimator != null) {
+            mRailColorAnimator.cancel();
+        }
+        if (mAccountLabelWidthAnimator != null) {
+            mAccountLabelWidthAnimator.cancel();
+        }
+
+        mRailExpanded = expanded;
+        setMainContentOffset(expanded, animate);
+        syncTopBarWithRail(expanded, animate);
+
+        // Always neutralize the stock dock padding before measuring/animating its width.
+        headersDock.setPadding(0, headersDock.getPaddingTop(), 0, headersDock.getPaddingBottom());
+
+        ViewGroup.LayoutParams raw = headersDock.getLayoutParams();
+        int currentWidth = raw != null && raw.width > 0 ? raw.width : targetWidth;
+
+        if (!animate || currentWidth == targetWidth) {
+            if (raw != null) {
+                raw.width = targetWidth;
+                headersDock.setLayoutParams(raw);
+            }
+            headersDock.setBackgroundColor(targetColor);
+            applyRailItemVisuals(expanded, false);
+            keepHeaderChildTransparentAndFilled();
+            return;
+        }
+
+        mRailWidthAnimator = ValueAnimator.ofInt(currentWidth, targetWidth);
+        mRailWidthAnimator.setDuration(RAIL_ANIMATION_MS);
+        mRailWidthAnimator.addUpdateListener(animation -> {
+            ViewGroup.LayoutParams params = headersDock.getLayoutParams();
+            if (params != null) {
+                params.width = (int) animation.getAnimatedValue();
+                headersDock.setLayoutParams(params);
+            }
+        });
+        mRailWidthAnimator.start();
+
+        int currentColor = expanded ? RAIL_COLLAPSED_COLOR : RAIL_EXPANDED_COLOR;
+        mRailColorAnimator = ValueAnimator.ofObject(new ArgbEvaluator(), currentColor, targetColor);
+        mRailColorAnimator.setDuration(RAIL_ANIMATION_MS);
+        mRailColorAnimator.addUpdateListener(animation ->
+                headersDock.setBackgroundColor((int) animation.getAnimatedValue()));
+        mRailColorAnimator.start();
+
+        applyRailItemVisuals(expanded, true);
+        keepHeaderChildTransparentAndFilled();
+    }
+
+    private void keepHeaderChildTransparentAndFilled() {
+        HeadersSupportFragment headersFragment = getHeadersSupportFragment();
+        View headersView = headersFragment != null ? headersFragment.getView() : null;
+        if (headersView == null) {
+            return;
+        }
+
+        headersView.setBackgroundColor(Color.TRANSPARENT);
+        ViewGroup.LayoutParams params = headersView.getLayoutParams();
+        if (params != null && params.width != ViewGroup.LayoutParams.MATCH_PARENT) {
+            params.width = ViewGroup.LayoutParams.MATCH_PARENT;
+            headersView.setLayoutParams(params);
+        }
+    }
+
+    private void applyRailItemVisuals(boolean expanded, boolean animate) {
+        HeadersSupportFragment headersFragment = getHeadersSupportFragment();
+        if (headersFragment == null) {
+            return;
+        }
+
+        VerticalGridView rail = headersFragment.getVerticalGridView();
+        if (rail == null) {
+            return;
+        }
+
+        float targetAlpha = expanded ? 1f : 0f;
+        float targetTranslation = expanded ? 0f : -dp(8);
+        int currentSection = Math.max(0, getSelectedPosition());
+        int focusedPosition = rail.getSelectedPosition();
+        boolean railHasFocus = rail.hasFocus();
+
+        for (int i = 0; i < rail.getChildCount(); i++) {
+            View child = rail.getChildAt(i);
+            int adapterPosition = rail.getChildAdapterPosition(child);
+            boolean isCurrentSection = adapterPosition == currentSection;
+            boolean isFocusedItem = expanded && railHasFocus && adapterPosition == focusedPosition;
+
+            // Let stateful icon drawables use a filled/current-page state when they provide one.
+            child.setSelected(isCurrentSection);
+
+            View surface = child.findViewById(R.id.header_surface);
+            if (surface != null) {
+                surface.setActivated(isFocusedItem);
+            }
+
+            android.widget.ImageView icon = child.findViewById(R.id.header_icon);
+            if (icon != null) {
+                icon.setSelected(isCurrentSection);
+                icon.setAlpha(1f);
+                // Expanded focus = black icon on the white card. Everything else stays crisp.
+                int iconColor = isFocusedItem ? Color.BLACK : (isCurrentSection ? Color.WHITE : 0xFFE6E6E6);
+                icon.setColorFilter(iconColor, PorterDuff.Mode.SRC_IN);
+            }
+
+            android.widget.TextView label = child.findViewById(R.id.header_label);
+            if (label != null) {
+                label.setSelected(isCurrentSection);
+                label.setTextColor(isFocusedItem ? Color.BLACK : Color.WHITE);
+                label.animate().cancel();
+                if (animate) {
+                    label.animate()
+                            .alpha(targetAlpha)
+                            .translationX(targetTranslation)
+                            .setDuration(expanded ? 150 : 100)
+                            .setStartDelay(expanded ? 35 : 0)
+                            .start();
+                } else {
+                    label.setAlpha(targetAlpha);
+                    label.setTranslationX(targetTranslation);
+                }
+            }
+
+            View divider = child.findViewById(R.id.header_divider);
+            if (divider != null && divider.getVisibility() == View.VISIBLE) {
+                divider.animate().cancel();
+                if (animate) {
+                    divider.animate()
+                            .alpha(targetAlpha)
+                            .setDuration(expanded ? 150 : 90)
+                            .setStartDelay(expanded ? 55 : 0)
+                            .start();
+                } else {
+                    divider.setAlpha(targetAlpha);
+                }
+            }
+        }
+    }
+
+    /**
+     * BrowseSupportFragment normally moves the entire headers fragment on and off screen. We keep
+     * the original focus routing, but replace only that visual transition with our overlay width
+     * animation. This means DPAD-left from the first card still enters the navigation rail and
+     * DPAD-right returns to the current video row.
+     */
+    private void installPermanentRailFocusBehavior(View root) {
+        if (root == null) {
+            return;
+        }
+
+        BrowseFrameLayout browseFrame = root.findViewById(R.id.browse_frame);
+        if (browseFrame == null) {
+            return;
+        }
+
+        final BrowseFrameLayout.OnChildFocusListener leanbackListener = browseFrame.getOnChildFocusListener();
+
+        browseFrame.setOnChildFocusListener(new BrowseFrameLayout.OnChildFocusListener() {
+            @Override
+            public boolean onRequestFocusInDescendants(int direction, Rect previouslyFocusedRect) {
+                return leanbackListener != null &&
+                        leanbackListener.onRequestFocusInDescendants(direction, previouslyFocusedRect);
+            }
+
+            @Override
+            public void onRequestChildFocus(View child, View focused) {
+                keepHeaderRailVisible();
+
+                View headersView = getHeadersSupportFragment() != null
+                        ? getHeadersSupportFragment().getView() : null;
+                boolean headerHasFocus = headersView != null &&
+                        (headersView == focused || headersView.hasFocus() || isDescendantOf(focused, headersView));
+
+                setRailExpanded(headerHasFocus, true);
+            }
+        });
+    }
+
+    /**
+     * Enter the navigation rail directly from the left-most card in a row. Leanback normally
+     * relies on its headers transition for this, but our always-visible overlay rail no longer
+     * participates in that transition. This restores the expected TV behavior: LEFT through the
+     * row, then one more LEFT opens/focuses the rail at the current section.
+     */
+    public boolean enterRailFromContentIfNeeded(View focusedView) {
+        Fragment mainFragment = getMainFragment();
+        View mainView = mainFragment != null ? mainFragment.getView() : null;
+
+        if (focusedView == null || mainView == null || !isDescendantOf(focusedView, mainView)) {
+            return false;
+        }
+
+        // If Android can still find another focusable view to the left inside the content, let
+        // normal row navigation handle it. Only intercept at the actual left edge of the row.
+        View nextLeft = focusedView.focusSearch(View.FOCUS_LEFT);
+        if (nextLeft != null && nextLeft != focusedView && isDescendantOf(nextLeft, mainView)) {
+            return false;
+        }
+
+        HeadersSupportFragment headersFragment = getHeadersSupportFragment();
+        if (headersFragment == null) {
+            return false;
+        }
+
+        VerticalGridView rail = headersFragment.getVerticalGridView();
+        if (rail == null) {
+            return false;
+        }
+
+        int targetPosition = Math.max(0, Math.min(getSelectedPosition(), mSectionRowAdapter.size() - 1));
+        headersFragment.setSelectedPosition(targetPosition);
+        rail.setSelectedPosition(targetPosition);
+
+        keepHeaderRailVisible();
+        setRailExpanded(true, true);
+
+        // Requesting focus on the grid lets BaseGridView forward it to its selected child. Post a
+        // second request because an item can still be laid out while the rail width animates.
+        boolean focused = rail.requestFocus();
+        rail.post(() -> {
+            rail.setSelectedPosition(targetPosition);
+            rail.requestFocus();
+        });
+
+        return focused || rail.isFocusable();
+    }
+
+    private boolean isDescendantOf(View view, View ancestor) {
+        if (view == null || ancestor == null) {
+            return false;
+        }
+
+        View current = view;
+        while (current != null) {
+            if (current == ancestor) {
+                return true;
+            }
+            if (!(current.getParent() instanceof View)) {
+                break;
+            }
+            current = (View) current.getParent();
+        }
+
+        return false;
+    }
+
+    private int dp(int value) {
+        if (getContext() == null) {
+            return value;
+        }
+
+        return Math.round(value * getContext().getResources().getDisplayMetrics().density);
     }
 
     /**
@@ -442,6 +1108,15 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
     @Override
     public void onDestroyView() {
         mSectionFragmentFactory.cleanup();
+        if (mRailWidthAnimator != null) {
+            mRailWidthAnimator.cancel();
+        }
+        if (mRailColorAnimator != null) {
+            mRailColorAnimator.cancel();
+        }
+        if (mAccountLabelWidthAnimator != null) {
+            mAccountLabelWidthAnimator.cancel();
+        }
 
         super.onDestroyView();
     }
@@ -513,17 +1188,8 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
             return;
         }
 
-        SplashPresenter splashPresenter = SplashPresenter.instance(getContext());
-
-        if (splashPresenter == null) {
-            return;
-        }
-
-        int appLogoRes = Helpers.getThemeAttr(getContext(), R.attr.appLogo);
-
-        Drawable bridgeIcon = Utils.getDrawable(getContext(), splashPresenter.getBridgePackageName(), "app_icon");
-
-        // Top right corner logo
-        setBadgeDrawable(bridgeIcon != null ? bridgeIcon : appLogoRes > 0 ? ContextCompat.getDrawable(getContext(), appLogoRes) : null);
+        // The reference uses a full wordmark at the top-right. Keep SmartTube branding there
+        // instead of a bridge application's single-letter icon.
+        setBadgeDrawable(ContextCompat.getDrawable(getContext(), R.mipmap.app_logo_semi_red));
     }
 }
