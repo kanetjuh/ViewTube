@@ -1,8 +1,14 @@
 package com.liskovsoft.smartyoutubetv2.tv.presenter;
 
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.PorterDuff;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.StateListDrawable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -79,7 +85,7 @@ public class IconHeaderItemPresenter extends RowHeaderPresenter {
                 //ViewUtil.makeMonochrome(iconView);
             } else {
                 Drawable icon = mResId > 0 ? ContextCompat.getDrawable(rootView.getContext(), mResId) : mDefaultIcon;
-                iconView.setImageDrawable(icon);
+                iconView.setImageDrawable(createNavigationStateDrawable(rootView.getContext(), icon));
             }
         }
 
@@ -107,6 +113,106 @@ public class IconHeaderItemPresenter extends RowHeaderPresenter {
         if (iconView != null) {
             iconView.setAlpha(1.0f);
         }
+    }
+
+
+    /**
+     * Builds the two visual weights used by the modern collapsed rail without requiring a
+     * second asset for every SmartTube section icon. The original resource is the filled
+     * selected/current icon. The default state is an outline derived from the drawable's alpha
+     * edge, so Home, Shorts, Kids, Sports, custom built-in sections, etc. all behave consistently.
+     * URL/channel artwork is intentionally left untouched in onBindViewHolder.
+     */
+    private Drawable createNavigationStateDrawable(Context context, Drawable source) {
+        if (source == null) {
+            return mDefaultIcon;
+        }
+
+        Drawable filled = cloneDrawable(source);
+        Drawable outline = createOutlineDrawable(context, cloneDrawable(source));
+        if (outline == null) {
+            return filled;
+        }
+
+        StateListDrawable states = new StateListDrawable();
+        // state_activated is the persistent "section currently on-screen" state. Leanback may
+        // clear state_selected when focus leaves the rail, so relying on selected alone made Home
+        // fall back to the thin outline while the user was scrolling Home videos.
+        states.addState(new int[] { android.R.attr.state_activated }, filled);
+        states.addState(new int[] { android.R.attr.state_selected }, filled);
+        states.addState(new int[] {}, outline);
+        return states;
+    }
+
+    private Drawable cloneDrawable(Drawable source) {
+        if (source == null) {
+            return null;
+        }
+        Drawable.ConstantState state = source.getConstantState();
+        return state != null ? state.newDrawable().mutate() : source.mutate();
+    }
+
+    /**
+     * Converts any local icon into a thin inner-edge outline. It is rendered once when the
+     * header binds; the resulting tiny bitmap is then reused by Android's drawable state system.
+     */
+    private Drawable createOutlineDrawable(Context context, Drawable source) {
+        if (source == null) {
+            return null;
+        }
+
+        final int size = 96; // supersampled so the 20-22dp TV glyph stays smooth
+        Bitmap rendered = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(rendered);
+        source.setBounds(0, 0, size, size);
+        source.setColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN);
+        source.draw(canvas);
+        source.clearColorFilter();
+
+        int[] src = new int[size * size];
+        int[] dst = new int[size * size];
+        rendered.getPixels(src, 0, size, 0, 0, size, size);
+
+        final int alphaThreshold = 24;
+        final int radius = 3;
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                int index = y * size + x;
+                int alpha = (src[index] >>> 24) & 0xFF;
+                if (alpha <= alphaThreshold) {
+                    continue;
+                }
+
+                boolean edge = false;
+                for (int dy = -radius; dy <= radius && !edge; dy++) {
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        if (dx == 0 && dy == 0) {
+                            continue;
+                        }
+                        int nx = x + dx;
+                        int ny = y + dy;
+                        if (nx < 0 || nx >= size || ny < 0 || ny >= size) {
+                            edge = true;
+                            break;
+                        }
+                        int neighborAlpha = (src[ny * size + nx] >>> 24) & 0xFF;
+                        if (neighborAlpha <= alphaThreshold) {
+                            edge = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (edge) {
+                    dst[index] = (alpha << 24) | 0x00FFFFFF;
+                }
+            }
+        }
+
+        Bitmap outlined = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        outlined.setPixels(dst, 0, size, 0, 0, size, size);
+        rendered.recycle();
+        return new BitmapDrawable(context.getResources(), outlined);
     }
 
     private final RequestListener<Drawable> mErrorListener = new RequestListener<Drawable>() {

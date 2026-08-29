@@ -3,8 +3,8 @@ package com.liskovsoft.smartyoutubetv2.tv.presenter;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import androidx.leanback.widget.FocusHighlight;
 import androidx.leanback.widget.VerticalGridPresenter;
-import com.liskovsoft.smartyoutubetv2.tv.util.ViewUtil;
 
 public class CustomVerticalGridPresenter extends VerticalGridPresenter {
     private final int mLayoutResId;
@@ -15,7 +15,10 @@ public class CustomVerticalGridPresenter extends VerticalGridPresenter {
     }
 
     public CustomVerticalGridPresenter(int layoutResId, int rootResId) {
-        super(ViewUtil.FOCUS_ZOOM_FACTOR, ViewUtil.FOCUS_DIMMER_ENABLED);
+        // Match the Home rows exactly: the card view owns focus visuals. Leanback must not add
+        // its own zoom, dimmer or shadow on grid-based pages such as Subscriptions/Shorts.
+        super(FocusHighlight.ZOOM_FACTOR_NONE, false);
+        setShadowEnabled(false);
 
         mLayoutResId = layoutResId;
         mRootResId = rootResId;

@@ -31,6 +31,11 @@ public class CustomListRowPresenter extends ListRowPresenter {
         // Leanback defaults to a 50% window keyline. That is why the focused second card used to
         // remain around the middle of the screen and the previous card stayed half visible.
         // Keep focus scrolling aligned, but move the keyline to the row's real left content edge.
+        // The outgoing card must be able to render past the grid's left bound and underneath
+        // the translucent navigation overlay. Otherwise the first icon-column width looks opaque.
+        grid.setClipChildren(false);
+        grid.setClipToPadding(false);
+
         grid.setFocusScrollStrategy(BaseGridView.FOCUS_SCROLL_ALIGNED);
         grid.setWindowAlignment(BaseGridView.WINDOW_ALIGN_NO_EDGE);
         grid.setWindowAlignmentOffset(grid.getPaddingLeft());

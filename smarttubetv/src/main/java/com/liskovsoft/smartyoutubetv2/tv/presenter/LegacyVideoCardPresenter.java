@@ -5,7 +5,9 @@ import android.content.Context;
 import android.graphics.drawable.Drawable;
 import android.os.Build.VERSION;
 import android.util.Pair;
+import android.view.View;
 import android.view.ViewGroup;
+import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
@@ -17,6 +19,7 @@ import com.bumptech.glide.load.engine.DiskCacheStrategy;
 import com.bumptech.glide.load.engine.GlideException;
 import com.bumptech.glide.request.RequestListener;
 import com.bumptech.glide.request.target.Target;
+import com.liskovsoft.sharedutils.helpers.Helpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MainUIData;
@@ -24,16 +27,19 @@ import com.liskovsoft.smartyoutubetv2.common.utils.ClickbaitRemover;
 import com.liskovsoft.smartyoutubetv2.tv.R;
 import com.liskovsoft.smartyoutubetv2.tv.presenter.base.LongClickPresenter;
 import com.liskovsoft.smartyoutubetv2.tv.ui.browse.video.GridFragmentHelper;
-import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.youtube.YouTubeVideoCardView;
+import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.complexcardview.ComplexImageCardView;
 import com.liskovsoft.smartyoutubetv2.tv.util.ViewUtil;
 
 /**
- * Video presenter rebuilt from the upstream SmartTube presenter, with only the visual card view
- * replaced. Playback, item click behaviour, preview, data loading and the existing model all stay
- * on SmartTube's original code path.
+ * SmartTube's original card presentation kept specifically for screens that should not inherit
+ * the YouTube-TV Home-feed card redesign (currently Search and Shorts).
  */
-public class VideoCardPresenter extends LongClickPresenter {
-    private static final String TAG = VideoCardPresenter.class.getSimpleName();
+public class LegacyVideoCardPresenter extends LongClickPresenter {
+    private static final String TAG = LegacyVideoCardPresenter.class.getSimpleName();
+    private int mDefaultBackgroundColor = -1;
+    private int mDefaultTextColor = -1;
+    private int mSelectedBackgroundColor = -1;
+    private int mSelectedTextColor = -1;
     private int mCardPreviewType;
     private int mThumbQuality;
     private int mWidth;
@@ -43,19 +49,64 @@ public class VideoCardPresenter extends LongClickPresenter {
     public ViewHolder onCreateViewHolder(ViewGroup parent) {
         Context context = parent.getContext();
 
+        mDefaultBackgroundColor =
+                ContextCompat.getColor(context, Helpers.getThemeAttr(context, R.attr.cardDefaultBackground));
+        mDefaultTextColor = ContextCompat.getColor(context, R.color.card_default_text);
+        mSelectedBackgroundColor =
+                ContextCompat.getColor(context, Helpers.getThemeAttr(context, R.attr.cardSelectedBackground));
+        mSelectedTextColor = ContextCompat.getColor(context, R.color.card_selected_text_grey);
+
         mCardPreviewType = getCardPreviewType(context);
         mThumbQuality = getThumbQuality(context);
+
+        boolean multilineTitle = isCardMultilineTitleEnabled(context);
+        boolean multilineSubtitle = isCardMultilineSubtitleEnabled(context);
+        boolean autoScroll = isCardTextAutoScrollEnabled(context);
+        float textScrollSpeed = getCardTextScrollSpeed(context);
+
         updateDimensions(context);
 
-        YouTubeVideoCardView cardView = new YouTubeVideoCardView(context);
+        ComplexImageCardView cardView = new ComplexImageCardView(context) {
+            @Override
+            public void setSelected(boolean selected) {
+                updateCardBackgroundColor(this, selected);
+                super.setSelected(selected);
+            }
+        };
+
+        cardView.setTitleLinesNum(multilineTitle ? 2 : 1);
+        cardView.setContentLinesNum(multilineSubtitle ? 2 : 1);
+        cardView.enableTextAutoScroll(autoScroll);
+        cardView.setTextScrollSpeed(textScrollSpeed);
         cardView.setFocusable(true);
         cardView.setFocusableInTouchMode(true);
         cardView.enableBadge(isBadgeEnabled());
-        cardView.setTitleVisible(isTitleEnabled());
-        cardView.setContentVisible(isContentEnabled());
-        cardView.setMainImageDimensions(mWidth, mHeight);
+        cardView.enableTitle(isTitleEnabled());
+        cardView.enableContent(isContentEnabled());
+        cardView.setBackgroundColor(mDefaultBackgroundColor);
+        updateCardBackgroundColor(cardView, false);
 
         return new ViewHolder(cardView);
+    }
+
+    private void updateCardBackgroundColor(ComplexImageCardView view, boolean selected) {
+        int backgroundColor = selected ? mSelectedBackgroundColor : mDefaultBackgroundColor;
+        int textColor = selected ? mSelectedTextColor : mDefaultTextColor;
+
+        View infoField = view.findViewById(R.id.info_field);
+        if (infoField != null) {
+            infoField.setBackgroundColor(backgroundColor);
+        }
+
+        TextView titleText = view.findViewById(R.id.title_text);
+        if (titleText != null) {
+            titleText.setTextColor(textColor);
+        }
+
+        TextView contentText = view.findViewById(R.id.content_text);
+        if (contentText != null) {
+            contentText.setTextColor(textColor);
+        }
     }
 
     @Override
@@ -63,32 +114,19 @@ public class VideoCardPresenter extends LongClickPresenter {
         super.onBindViewHolder(viewHolder, item);
 
         Video video = (Video) item;
-        YouTubeVideoCardView cardView = (YouTubeVideoCardView) viewHolder.view;
+        ComplexImageCardView cardView = (ComplexImageCardView) viewHolder.view;
         Context context = cardView.getContext();
 
         cardView.setTitleText(video.getTitle());
-        cardView.setMetadata(video.getSecondTitle(), video.getAuthor(), getQualityHint(video));
-        cardView.setTitleVisible(isTitleEnabled());
-        cardView.setContentVisible(isContentEnabled());
-
-        // Count progress that is very close to zero. E.g. when the user closed a video immediately.
+        cardView.setContentText(video.getSecondTitle());
         cardView.setProgress(video.percentWatched > 0 && video.percentWatched < 1 ? 1 : Math.round(video.percentWatched));
-        // YouTube TV-style thumbnail badges: dark duration pill for normal videos and
-        // a red broadcast LIVE pill in the same bottom-right position for live streams.
-        boolean showDuration = !video.hasNewContent && !video.isLive && !video.isUpcoming && !video.isShorts &&
-                video.badge != null && video.badge.length() > 0;
-        boolean showLive = video.isLive;
-        cardView.setDurationText(
-                showLive ? context.getString(R.string.badge_live) : (showDuration ? video.badge : null),
-                showLive
-        );
         cardView.setBadgeText(
-                showDuration || showLive ? null :
                 video.hasNewContent ? context.getString(R.string.badge_new_content) :
+                video.isLive ? context.getString(R.string.badge_live) :
                 video.isShorts ? context.getString(R.string.header_shorts).toUpperCase() :
                 video.badge
         );
-        cardView.setBadgeColor(video.hasNewContent || video.isUpcoming ?
+        cardView.setBadgeColor(video.hasNewContent || video.isLive || video.isUpcoming ?
                 ContextCompat.getColor(context, R.color.dark_red) : ContextCompat.getColor(context, R.color.black));
 
         if (mCardPreviewType != MainUIData.CARD_PREVIEW_DISABLED) {
@@ -96,7 +134,6 @@ public class VideoCardPresenter extends LongClickPresenter {
             cardView.setMute(mCardPreviewType == MainUIData.CARD_PREVIEW_MUTED);
         }
 
-        // Grid scale can change from settings, so apply current dimensions on each bind as upstream does.
         updateDimensions(context);
         cardView.setMainImageDimensions(mWidth, mHeight);
 
@@ -124,58 +161,10 @@ public class VideoCardPresenter extends LongClickPresenter {
     public void onUnbindViewHolder(Presenter.ViewHolder viewHolder) {
         super.onUnbindViewHolder(viewHolder);
 
-        YouTubeVideoCardView cardView = (YouTubeVideoCardView) viewHolder.view;
-        cardView.stopPreview(true);
+        ComplexImageCardView cardView = (ComplexImageCardView) viewHolder.view;
+        cardView.setBadgeImage(null);
+        cardView.setMainImage(null);
         Glide.with(cardView.getContext().getApplicationContext()).clear(cardView.getMainImageView());
-        cardView.getMainImageView().setImageDrawable(null);
-    }
-
-
-    /**
-     * The current TV feed sometimes exposes the 4K/8K label separately from SmartTube's
-     * secondTitle, so the custom card never sees it. Preserve any quality token that did make it
-     * into the model and use a conservative title fallback (e.g. "4K", "2160p", "8K").
-     * Duration strings such as 26:51 are deliberately ignored.
-     */
-    private String getQualityHint(Video video) {
-        if (video == null) {
-            return null;
-        }
-
-        String quality = extractQualityToken(video.badge);
-        if (quality != null) {
-            return quality;
-        }
-
-        quality = extractQualityToken(video.getSecondTitle() != null ? video.getSecondTitle().toString() : null);
-        if (quality != null) {
-            return quality;
-        }
-
-        return extractQualityToken(video.getTitle());
-    }
-
-    private String extractQualityToken(String text) {
-        if (text == null) {
-            return null;
-        }
-
-        String value = text.toUpperCase(java.util.Locale.US);
-
-        if (value.matches(".*(^|[^A-Z0-9])(?:8K|4320P)([^A-Z0-9]|$).*")) {
-            return "8K";
-        }
-        if (value.matches(".*(^|[^A-Z0-9])(?:4K|2160P|UHD)([^A-Z0-9]|$).*")) {
-            return "4K";
-        }
-        if (value.matches(".*(^|[^A-Z0-9])HDR([^A-Z0-9]|$).*")) {
-            return "HDR";
-        }
-        if (value.matches(".*(^|[^A-Z0-9])60FPS([^A-Z0-9]|$).*")) {
-            return "60FPS";
-        }
-
-        return null;
     }
 
     private void updateDimensions(Context context) {
@@ -185,11 +174,14 @@ public class VideoCardPresenter extends LongClickPresenter {
     }
 
     protected Pair<Integer, Integer> getCardDimensPx(Context context) {
-        return GridFragmentHelper.getCardDimensPx(context, R.dimen.card_width, R.dimen.card_height,
-                MainUIData.instance(context).getVideoGridScale());
+        return GridFragmentHelper.getCardDimensPx(
+                context,
+                R.dimen.card_width,
+                R.dimen.card_height,
+                MainUIData.instance(context).getVideoGridScale()
+        );
     }
 
-    // Kept for compatibility with TinyCardPresenter and future SmartTube subclasses.
     protected boolean isCardTextAutoScrollEnabled(Context context) {
         return MainUIData.instance(context).isCardTextAutoScrollEnabled();
     }

@@ -42,6 +42,7 @@ public class YouTubeVideoCardView extends LinearLayout {
     private TextView mChipOne;
     private TextView mChipTwo;
     private TextView mMetadata;
+    private TextView mDuration;
 
     private int mCardWidth;
     private int mCardHeight;
@@ -93,6 +94,7 @@ public class YouTubeVideoCardView extends LinearLayout {
         mChipOne = findViewById(R.id.yt_chip_one);
         mChipTwo = findViewById(R.id.yt_chip_two);
         mMetadata = findViewById(R.id.content_text);
+        mDuration = findViewById(R.id.yt_duration_text);
 
         if (Build.VERSION.SDK_INT >= 21) {
             mThumbnailClip.setClipToOutline(true);
@@ -160,6 +162,10 @@ public class YouTubeVideoCardView extends LinearLayout {
      * YouTube TV: channel on its own row, compact quality/caption chips and views/date after it.
      */
     public void setMetadata(CharSequence secondTitle, String author) {
+        setMetadata(secondTitle, author, null);
+    }
+
+    public void setMetadata(CharSequence secondTitle, String author, String qualityHint) {
         String source = secondTitle != null ? secondTitle.toString().trim() : "";
         String cleanAuthor = author != null ? author.trim() : "";
 
@@ -203,6 +209,25 @@ public class YouTubeVideoCardView extends LinearLayout {
 
         if (TextUtils.isEmpty(cleanAuthor) && !metadataParts.isEmpty()) {
             cleanAuthor = metadataParts.remove(0);
+        }
+
+        // If the feed parser kept the YouTube quality badge outside secondTitle, add the hint here.
+        // Avoid duplicates when the same 4K/8K token was already present in the metadata text.
+        if (!TextUtils.isEmpty(qualityHint)) {
+            String normalizedHint = normalizeChip(qualityHint);
+            boolean alreadyPresent = false;
+            for (String chip : chips) {
+                if (normalizedHint.equalsIgnoreCase(normalizeChip(chip))) {
+                    alreadyPresent = true;
+                    break;
+                }
+            }
+            if (!alreadyPresent) {
+                chips.add(0, normalizedHint);
+                if (chips.size() > 2) {
+                    chips.remove(chips.size() - 1);
+                }
+            }
         }
 
         mAuthor.setText(cleanAuthor);
@@ -261,6 +286,27 @@ public class YouTubeVideoCardView extends LinearLayout {
             result.append(part);
         }
         return result.toString();
+    }
+
+
+    public void setDurationText(CharSequence duration, boolean live) {
+        if (mDuration == null) {
+            return;
+        }
+
+        if (TextUtils.isEmpty(duration)) {
+            mDuration.setText(null);
+            mDuration.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0);
+            mDuration.setVisibility(GONE);
+            return;
+        }
+
+        mDuration.setText(duration);
+        mDuration.setBackgroundResource(live ? R.drawable.yt_live_badge_bg : R.drawable.yt_duration_badge_bg);
+        mDuration.setCompoundDrawablesWithIntrinsicBounds(live ? R.drawable.yt_live_broadcast : 0, 0, 0, 0);
+        mDuration.setCompoundDrawablePadding(live ? dp(3) : 0);
+        mDuration.setPadding(dp(live ? 7 : 6), dp(3), dp(live ? 8 : 6), dp(3));
+        mDuration.setVisibility(VISIBLE);
     }
 
     public void setProgress(int percent) {
@@ -346,6 +392,12 @@ public class YouTubeVideoCardView extends LinearLayout {
         clip.setColor(Color.BLACK);
         clip.setCornerRadius(Math.max(0, radius - stroke));
         mThumbnailClip.setBackground(clip);
+
+        // YouTube TV makes the focused video's title bright white while neighbouring titles
+        // are slightly subdued. This gives directional focus feedback without adding a card block.
+        if (mTitle != null) {
+            mTitle.setTextColor(focused ? Color.WHITE : Color.rgb(184, 184, 184));
+        }
 
         // Keep the card dimensions completely stable; the white ring is the focus indicator.
         animate().cancel();

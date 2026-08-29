@@ -22,8 +22,8 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.SearchPresenter;
 import com.liskovsoft.smartyoutubetv2.common.misc.CrashRestorer;
 import com.liskovsoft.smartyoutubetv2.common.prefs.SearchData;
 import com.liskovsoft.smartyoutubetv2.tv.adapter.VideoGroupObjectAdapter;
+import com.liskovsoft.smartyoutubetv2.tv.presenter.LegacyVideoCardPresenter;
 import com.liskovsoft.smartyoutubetv2.tv.presenter.ShortsCardPresenter;
-import com.liskovsoft.smartyoutubetv2.tv.presenter.VideoCardPresenter;
 import com.liskovsoft.smartyoutubetv2.tv.presenter.base.OnItemLongPressedListener;
 import com.liskovsoft.smartyoutubetv2.tv.ui.common.LeanbackActivity;
 import com.liskovsoft.smartyoutubetv2.tv.ui.search.tags.vineyard.SearchTagsFragmentBase;
@@ -39,7 +39,7 @@ public class SearchTagsFragment extends SearchTagsFragmentBase {
     private Map<Integer, VideoGroupObjectAdapter> mSearchGroupAdapters;
     private String mSearchQuery;
     private String mNewQuery;
-    private VideoCardPresenter mCardPresenter;
+    private LegacyVideoCardPresenter mCardPresenter;
     private ShortsCardPresenter mShortsPresenter;
     private SearchData mSearchData;
     private boolean mIsFragmentCreated;
@@ -57,7 +57,7 @@ public class SearchTagsFragment extends SearchTagsFragmentBase {
         mIsFragmentCreated = true;
         mSearchPresenter = SearchPresenter.instance(getContext());
         mSearchPresenter.setView(this);
-        mCardPresenter = new VideoCardPresenter();
+        mCardPresenter = new LegacyVideoCardPresenter();
         mShortsPresenter = new ShortsCardPresenter();
         mSearchGroupAdapters = new HashMap<>();
         mSearchData = SearchData.instance(getContext());

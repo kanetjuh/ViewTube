@@ -13,6 +13,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewGroup.MarginLayoutParams;
 import android.view.ViewParent;
+import android.view.ViewTreeObserver;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -64,21 +65,29 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
     private boolean mFocusOnContent;
     private boolean mSyncingRailSelection;
     private boolean mRailExpanded;
+    // v26: visual activation is committed by click; DPAD hover stays separate.
+    private int mCommittedHeaderPosition = 0;
     private ValueAnimator mRailWidthAnimator;
     private ValueAnimator mRailColorAnimator;
     private ValueAnimator mAccountLabelWidthAnimator;
     private Integer mContentAnchorInsetPx;
+    private View mFocusObserverRoot;
+    private ViewTreeObserver.OnGlobalFocusChangeListener mGlobalFocusChangeListener;
     private CrashRestorer mCrashRestorer;
 
-    // The icon slot itself is still 64dp (icon_header_item.xml). The translucent surface is wider,
-    // like YouTube TV: it extends past the icon center and covers the outgoing card sliver.
-    private static final int RAIL_COLLAPSED_FALLBACK_DP = 96;
+    // Collapsed navigation is exactly the 64dp icon rail: one surface, no translucent extension.
+    // Keeping it opaque also prevents the content/background underneath from creating the visual
+    // impression of two different sidebar layers.
+    private static final int RAIL_COLLAPSED_FALLBACK_DP = 64;
     private static final int RAIL_EXPANDED_DP = 220;
     private static final int RAIL_ANIMATION_MS = 165;
-    private static final int RAIL_COLLAPSED_COLOR = 0xD0141414; // ~82%: fuller than v11, still lets a small content sliver show through
+    private static final int RAIL_COLLAPSED_COLOR = 0xDC0F0F0F;
     private static final int RAIL_EXPANDED_COLOR = 0xFF0F0F0F;
-    private static final int CONTENT_COLLAPSED_OFFSET_DP = -8; // only a tiny YouTube-style underlap, never half a card
-    private static final int CONTENT_EXPANDED_OFFSET_DP = RAIL_EXPANDED_DP - RAIL_COLLAPSED_FALLBACK_DP; // 124dp: keep the same content edge when rail expands
+    // Pull the feed left by the same 32dp removed from the old 96dp rail. This keeps the selected
+    // card close to the rail and moves the outgoing card completely behind the single 64dp panel.
+    private static final int CONTENT_COLLAPSED_OFFSET_DP = -48;
+    // Preserve the already-correct expanded content position from v18.
+    private static final int CONTENT_EXPANDED_OFFSET_DP = 124;
     private static final int TOPBAR_AFTER_RAIL_GAP_DP = 12;
 
     @Override
@@ -120,6 +129,12 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
 
         mProgressBarManager.setRootView((ViewGroup) root);
         installPermanentRailFocusBehavior(root);
+        installImmediateRailFocusObserver(root);
+
+        // Let horizontally scrolled cards render underneath the *entire* translucent rail.
+        // Without this, the content hierarchy clips at its own left edge, which looks like an
+        // opaque 64dp slab plus a second translucent slab even though the rail has one background.
+        root.post(this::allowContentToRenderBehindRail);
 
         return root;
     }
@@ -143,6 +158,7 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
         prepareEntranceTransition();
 
         mBrowsePresenter.onViewInitialized();
+        mCommittedHeaderPosition = Math.max(0, getSelectedPosition());
 
         // Restore state after crash
         mCrashRestorer.restoreHeader((idx, video) -> {
@@ -169,6 +185,10 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
                         return;
                     }
 
+                    // Header focus is SmartTube's actual section switch. Persist it separately from
+                    // focus so the collapsed rail can keep the current destination filled.
+                    mCommittedHeaderPosition = newPosition;
+
                     if (getSelectedPosition() != newPosition) {
                         mSyncingRailSelection = true;
                         try {
@@ -185,6 +205,8 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
 
                     keepHeaderRailVisible();
                     applyRailItemVisuals(mRailExpanded, false);
+                    // v24: account label follows the CURRENT focused sidebar item immediately.
+                    syncTopBarWithRail(mRailExpanded, false);
                 }
         );
 
@@ -192,6 +214,9 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
                 (viewHolder, row) -> {
                     long headerId = row.getHeaderItem().getId();
                     int newPosition = indexOf(headerId);
+                    // v26: ENTER/OK commits the focused sidebar item.
+                    mCommittedHeaderPosition = Math.max(0, newPosition);
+                    applyRailItemVisuals(mRailExpanded, false);
 
                     if (getHeadersSupportFragment().getSelectedPosition() != newPosition) {
                         getHeadersSupportFragment().setSelectedPosition(newPosition);
@@ -389,6 +414,7 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
     @Override
     public void selectSection(int index, boolean focusOnContent) {
         if (index >= 0 && mSectionRowAdapter.size() > 0) {
+            mCommittedHeaderPosition = Math.min(index, mSectionRowAdapter.size() - 1);
             mFocusOnContent = focusOnContent; // focus after header transition
 
             // Fix refresh current section
@@ -420,9 +446,9 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
      * HeadersSupportFragment. That left the 50dp dock as a second visual/geometry layer, which is
      * exactly the strip visible over/next to the icons in the screenshots.
      *
-     * Fix: the DOCK is now the single owner of sidebar width/background. Its stock shadow padding is
-     * removed. The child header fragment always fills the dock and stays transparent. Collapsed =
-     * transparent icon rail. Expanded = one dark panel. No second slab, no guessed orb-width surface.
+     * The DOCK is the single owner of sidebar width/background. Its stock shadow padding is removed.
+     * The child header fragment always fills the dock and stays transparent. Collapsed and expanded
+     * therefore both render as one continuous dark surface, never as two overlapping slabs.
      */
     private void keepHeaderRailVisible() {
         HeadersSupportFragment headersFragment = getHeadersSupportFragment();
@@ -493,10 +519,12 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
             rail.setAlpha(1f);
         }
 
+        allowContentToRenderBehindRail();
         applyRailItemVisuals(mRailExpanded, false);
 
-        // Title bar lives in a separate Leanback container. Re-align both axes after every rail
-        // layout pass: account orb to the icon column, mic/search to the actual content/card start.
+        // Title bar lives in a separate Leanback container. Re-align horizontally after every rail
+        // layout pass. Do NOT pin it vertically: the avatar and account label must scroll away
+        // together when Leanback hides the title bar.
         headersDock.post(() -> {
             alignAccountOrbToRail();
             alignSearchControlsToContent(mRailExpanded, false);
@@ -514,9 +542,9 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
     }
 
     /**
-     * YouTube-style behavior:
-     * - collapsed icon rail is a translucent overlay: content is pulled left underneath it, so
-     *   thumbnails/rows remain faintly visible behind the icons like the YouTube TV rail;
+     * Navigation/content behavior:
+     * - collapsed icon rail is one lightly translucent 64dp panel; content is pulled left enough that the
+     *   outgoing card disappears fully behind that panel rather than peeking out beside it;
      * - expanded navigation is a real opaque panel: content slides right to clear the full menu,
      *   so cards/row titles never remain underneath the expanded navigation.
      */
@@ -596,68 +624,52 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
             return;
         }
 
-        // Do this after the rail width/layout pass so all screen coordinates are real.
+        // v24: never capture the old section/expanded state before posting this runnable.
+        // Rapid DPAD moves can queue multiple callbacks; every queued callback must resolve
+        // against the CURRENT rail state when it actually runs. The account name is therefore
+        // binary: visible only when Home (header position 0) is focused AND the rail is expanded.
         headersDock.post(() -> {
             alignAccountOrbToRail();
 
-            int currentLabelWidth = accountLabel.getWidth();
+            HeadersSupportFragment headersFragment = getHeadersSupportFragment();
+            int focusedHeaderPosition = headersFragment != null
+                    ? headersFragment.getSelectedPosition() : -1;
+            boolean railExpandedNow = mRailExpanded;
+            // v25: only a real signed-in account has a non-empty channel label. Anonymous
+            // sessions keep the same account-button slot, but never show "None" or reserve width.
+            boolean hasAccountName = accountLabel instanceof android.widget.TextView &&
+                    ((android.widget.TextView) accountLabel).length() > 0;
+            boolean showAccountLabel = railExpandedNow && focusedHeaderPosition == 0 && hasAccountName;
+
+            if (mAccountLabelWidthAnimator != null) {
+                mAccountLabelWidthAnimator.cancel();
+                mAccountLabelWidthAnimator = null;
+            }
+            accountLabel.animate().cancel();
+
             int targetLabelWidth = 0;
-            if (expanded) {
+            if (showAccountLabel) {
                 int[] dockLocation = new int[2];
-                int[] accountLocation = new int[2];
+                int[] labelLocation = new int[2];
                 headersDock.getLocationOnScreen(dockLocation);
-                accountOrb.getLocationOnScreen(accountLocation);
-                int labelStart = accountLocation[0] + accountOrb.getWidth() + dp(8);
+                accountLabel.getLocationOnScreen(labelLocation);
+                int labelStart = labelLocation[0];
                 int labelEnd = dockLocation[0] + dp(RAIL_EXPANDED_DP) - dp(12);
                 targetLabelWidth = Math.max(0, labelEnd - labelStart);
             }
 
-            if (mAccountLabelWidthAnimator != null) {
-                mAccountLabelWidthAnimator.cancel();
-            }
-            accountLabel.animate().cancel();
-
-            if (expanded) {
-                accountLabel.setVisibility(View.VISIBLE);
-            }
-
             ViewGroup.LayoutParams params = accountLabel.getLayoutParams();
             if (params != null) {
-                if (!animate) {
-                    params.width = targetLabelWidth;
-                    accountLabel.setLayoutParams(params);
-                    accountLabel.setAlpha(expanded ? 1f : 0f);
-                    if (!expanded) {
-                        accountLabel.setVisibility(View.GONE);
-                    }
-                } else {
-                    int startWidth = currentLabelWidth;
-                    mAccountLabelWidthAnimator = ValueAnimator.ofInt(startWidth, targetLabelWidth);
-                    mAccountLabelWidthAnimator.setDuration(RAIL_ANIMATION_MS);
-                    mAccountLabelWidthAnimator.addUpdateListener(animation -> {
-                        ViewGroup.LayoutParams lp = accountLabel.getLayoutParams();
-                        if (lp != null) {
-                            lp.width = (int) animation.getAnimatedValue();
-                            accountLabel.setLayoutParams(lp);
-                        }
-                    });
-                    mAccountLabelWidthAnimator.start();
-
-                    accountLabel.animate()
-                            .alpha(expanded ? 1f : 0f)
-                            .setDuration(expanded ? 150 : 100)
-                            .withEndAction(() -> {
-                                if (!expanded) {
-                                    accountLabel.setVisibility(View.GONE);
-                                }
-                            })
-                            .start();
-                }
+                params.width = targetLabelWidth;
+                accountLabel.setLayoutParams(params);
             }
 
-            // Microphone + Search are a separate group now. Their left edge tracks the exact
-            // content/card anchor in both states, so the mic starts where row titles/cards start.
-            alignSearchControlsToContent(expanded, animate);
+            // No per-tab fading or width animation. This state changes in one frame.
+            accountLabel.setAlpha(showAccountLabel ? 1f : 0f);
+            accountLabel.setVisibility(showAccountLabel ? View.VISIBLE : View.GONE);
+
+            // Mic + Search keep following the current rail/content geometry independently.
+            alignSearchControlsToContent(railExpandedNow, animate);
         });
     }
 
@@ -839,37 +851,63 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
 
         float targetAlpha = expanded ? 1f : 0f;
         float targetTranslation = expanded ? 0f : -dp(8);
-        int currentSection = Math.max(0, getSelectedPosition());
         int focusedPosition = rail.getSelectedPosition();
+        // Keep one persistent "current section" independent from rail focus. mCommittedHeaderPosition
+        // is updated whenever SmartTube switches section, and does not get cleared when focus moves
+        // into the feed/search controls.
+        int activeSectionPosition = Math.max(0,
+                Math.min(mCommittedHeaderPosition, Math.max(0, mSectionRowAdapter.size() - 1)));
         boolean railHasFocus = rail.hasFocus();
 
         for (int i = 0; i < rail.getChildCount(); i++) {
             View child = rail.getChildAt(i);
             int adapterPosition = rail.getChildAdapterPosition(child);
-            boolean isCurrentSection = adapterPosition == currentSection;
             boolean isFocusedItem = expanded && railHasFocus && adapterPosition == focusedPosition;
+            // v27: Leanback changes the active section as soon as a header receives DPAD focus.
+            // There is no separate reliable "committed" click state for normal sidebar navigation.
+            // Therefore the white pill + black icon/text must follow the currently focused header
+            // while the rail owns focus. As soon as focus leaves the rail (Search/content/account),
+            // the pill disappears and every header returns to white.
+            boolean isActivatedItem = isFocusedItem;
 
-            // Let stateful icon drawables use a filled/current-page state when they provide one.
-            child.setSelected(isCurrentSection);
+            // Visual states:
+            // inactive -> white icon/text without a pill
+            // focused/current header -> white pill with black icon/text
+            // focus leaves navbar -> pill removed immediately, text/icon back to white
+            child.setSelected(isFocusedItem);
+            // v28: header_surface has duplicateParentState=true. The activated state therefore
+            // has to be set on the ROW itself; setting it only on header_surface is ignored by
+            // the drawable-state duplication and caused black text/icon with no white pill.
+            child.setActivated(isActivatedItem);
+            child.refreshDrawableState();
 
             View surface = child.findViewById(R.id.header_surface);
             if (surface != null) {
-                surface.setActivated(isFocusedItem);
+                surface.setActivated(isActivatedItem);
+                surface.refreshDrawableState();
             }
 
             android.widget.ImageView icon = child.findViewById(R.id.header_icon);
             if (icon != null) {
-                icon.setSelected(isCurrentSection);
+                // YouTube TV-style icon weight:
+                // - the section currently being viewed stays FILLED while focus is in the feed;
+                // - every destination you can move to uses the thin OUTLINE version;
+                // - moving onto a header fills that icon; selecting/focusing it in the expanded
+                //   navbar still turns the filled icon black on the white selection pill.
+                boolean shouldUseFilledIcon = adapterPosition == activeSectionPosition || isFocusedItem;
+                // Activated survives Leanback focus/select bookkeeping; selected remains useful for
+                // the temporary hover state while the expanded rail owns focus.
+                icon.setActivated(shouldUseFilledIcon);
+                icon.setSelected(shouldUseFilledIcon);
+                icon.refreshDrawableState();
                 icon.setAlpha(1f);
-                // Expanded focus = black icon on the white card. Everything else stays crisp.
-                int iconColor = isFocusedItem ? Color.BLACK : (isCurrentSection ? Color.WHITE : 0xFFE6E6E6);
-                icon.setColorFilter(iconColor, PorterDuff.Mode.SRC_IN);
+                icon.setColorFilter(isActivatedItem ? Color.BLACK : Color.WHITE, PorterDuff.Mode.SRC_IN);
             }
 
             android.widget.TextView label = child.findViewById(R.id.header_label);
             if (label != null) {
-                label.setSelected(isCurrentSection);
-                label.setTextColor(isFocusedItem ? Color.BLACK : Color.WHITE);
+                label.setSelected(isFocusedItem);
+                label.setTextColor(isActivatedItem ? Color.BLACK : Color.WHITE);
                 label.animate().cancel();
                 if (animate) {
                     label.animate()
@@ -937,6 +975,87 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
                 setRailExpanded(headerHasFocus, true);
             }
         });
+    }
+
+    /**
+     * Leanback's child-focus callback does not fire for every nested focus hop. In particular,
+     * the first card can receive focus while the expanded rail is still visible, and only the
+     * next DPAD_RIGHT causes the rail to collapse. Observe the real global focus instead: the
+     * moment focus enters the main content, collapse; the moment it enters the headers, expand.
+     */
+    private void installImmediateRailFocusObserver(View root) {
+        if (root == null) {
+            return;
+        }
+
+        mFocusObserverRoot = root;
+        mGlobalFocusChangeListener = (oldFocus, newFocus) -> {
+            if (newFocus == null || getView() == null) {
+                return;
+            }
+
+            View headersView = getHeadersSupportFragment() != null
+                    ? getHeadersSupportFragment().getView() : null;
+            Fragment mainFragment = getMainFragment();
+            View mainView = mainFragment != null ? mainFragment.getView() : null;
+
+            boolean inHeaders = headersView != null &&
+                    (newFocus == headersView || isDescendantOf(newFocus, headersView));
+            boolean inMainContent = mainView != null &&
+                    (newFocus == mainView || isDescendantOf(newFocus, mainView));
+
+            if (inMainContent && mRailExpanded) {
+                keepHeaderRailVisible();
+                setRailExpanded(false, true);
+            } else if (inHeaders && !mRailExpanded) {
+                keepHeaderRailVisible();
+                setRailExpanded(true, true);
+            }
+
+            // v26: Search/account/title live outside both trees. Refresh after every focus hop
+            // so a label can never stay black after the white navbar pill is gone.
+            root.post(() -> {
+                applyRailItemVisuals(mRailExpanded, false);
+                syncTopBarWithRail(mRailExpanded, false);
+            });
+
+        };
+
+        root.getViewTreeObserver().addOnGlobalFocusChangeListener(mGlobalFocusChangeListener);
+    }
+
+    /**
+     * The collapsed rail has only ONE translucent surface. The apparent solid inner strip came
+     * from clipping: the previous card was not allowed to draw left of the content/grid bounds.
+     * Disable clipping through the relevant container chain so the outgoing card can continue
+     * underneath the icon column, exactly like the YouTube TV overlay.
+     */
+    private void allowContentToRenderBehindRail() {
+        View contentDock = getContentDock();
+        if (contentDock == null) {
+            return;
+        }
+
+        View current = contentDock;
+        int levels = 0;
+        while (current != null && levels < 3) {
+            if (current instanceof ViewGroup) {
+                ViewGroup group = (ViewGroup) current;
+                group.setClipChildren(false);
+                group.setClipToPadding(false);
+            }
+
+            ViewParent parent = current.getParent();
+            current = parent instanceof View ? (View) parent : null;
+            levels++;
+        }
+
+        Fragment mainFragment = getMainFragment();
+        View mainView = mainFragment != null ? mainFragment.getView() : null;
+        if (mainView instanceof ViewGroup) {
+            ((ViewGroup) mainView).setClipChildren(false);
+            ((ViewGroup) mainView).setClipToPadding(false);
+        }
     }
 
     /**
@@ -1107,6 +1226,15 @@ public class BrowseFragment extends BrowseSupportFragment implements BrowseView 
 
     @Override
     public void onDestroyView() {
+        if (mFocusObserverRoot != null && mGlobalFocusChangeListener != null) {
+            ViewTreeObserver observer = mFocusObserverRoot.getViewTreeObserver();
+            if (observer.isAlive()) {
+                observer.removeOnGlobalFocusChangeListener(mGlobalFocusChangeListener);
+            }
+        }
+        mFocusObserverRoot = null;
+        mGlobalFocusChangeListener = null;
+
         mSectionFragmentFactory.cleanup();
         if (mRailWidthAnimator != null) {
             mRailWidthAnimator.cancel();

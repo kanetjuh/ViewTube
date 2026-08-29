@@ -19,6 +19,26 @@
                 android:id="@+id/main_image_wrapper"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
+
+            <TextView
+                android:id="@+id/yt_duration_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end|bottom"
+                android:layout_marginEnd="6dp"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/yt_duration_badge_bg"
+                android:fontFamily="sans-serif-medium"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:paddingStart="6dp"
+                android:paddingTop="3dp"
+                android:paddingEnd="6dp"
+                android:paddingBottom="3dp"
+                android:textColor="#FFFFFFFF"
+                android:textSize="13.5sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
         </FrameLayout>
     </FrameLayout>
 
@@ -40,19 +60,19 @@
         android:id="@+id/yt_author_text"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="5dp"
         android:ellipsize="end"
         android:fontFamily="sans-serif"
         android:includeFontPadding="false"
         android:maxLines="1"
-        android:textColor="#FFA9A9A9"
+        android:textColor="#FFAFAFAF"
         android:textSize="13.5sp" />
 
     <LinearLayout
         android:id="@+id/yt_metadata_row"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
+        android:layout_marginTop="4dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
@@ -99,7 +119,7 @@
             android:fontFamily="sans-serif"
             android:includeFontPadding="false"
             android:maxLines="1"
-            android:textColor="#FFA9A9A9"
+            android:textColor="#FFAFAFAF"
             android:textSize="13.5sp" />
     </LinearLayout>
 </merge>

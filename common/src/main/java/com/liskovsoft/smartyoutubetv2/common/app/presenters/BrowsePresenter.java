@@ -197,8 +197,8 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
             mSectionsMapping.put(MediaGroup.TYPE_NEWS, new BrowseSection(MediaGroup.TYPE_NEWS, getContext().getString(R.string.header_news), BrowseSection.TYPE_ROW, R.drawable.icon_news));
         }
         mSectionsMapping.put(MediaGroup.TYPE_MUSIC, new BrowseSection(MediaGroup.TYPE_MUSIC, getContext().getString(R.string.header_music), BrowseSection.TYPE_ROW, R.drawable.icon_music));
-        mSectionsMapping.put(MediaGroup.TYPE_CHANNEL_UPLOADS, new BrowseSection(MediaGroup.TYPE_CHANNEL_UPLOADS, getContext().getString(R.string.header_channels), uploadsType, R.drawable.icon_channels, false));
-        mSectionsMapping.put(MediaGroup.TYPE_SUBSCRIPTIONS, new BrowseSection(MediaGroup.TYPE_SUBSCRIPTIONS, getContext().getString(R.string.header_subscriptions), BrowseSection.TYPE_GRID, R.drawable.icon_subscriptions, false));
+        mSectionsMapping.put(MediaGroup.TYPE_CHANNEL_UPLOADS, new BrowseSection(MediaGroup.TYPE_CHANNEL_UPLOADS, getContext().getString(R.string.header_channels), uploadsType, R.drawable.icon_channels, true)); // v32 auth-only
+        mSectionsMapping.put(MediaGroup.TYPE_SUBSCRIPTIONS, new BrowseSection(MediaGroup.TYPE_SUBSCRIPTIONS, getContext().getString(R.string.header_subscriptions), BrowseSection.TYPE_GRID, R.drawable.icon_subscriptions, true)); // v32 auth-only
         mSectionsMapping.put(MediaGroup.TYPE_HISTORY, new BrowseSection(MediaGroup.TYPE_HISTORY, getContext().getString(R.string.header_history), BrowseSection.TYPE_GRID, R.drawable.icon_history, true));
         mSectionsMapping.put(MediaGroup.TYPE_BLOCKED_CHANNELS,
                 new BrowseSection(MediaGroup.TYPE_BLOCKED_CHANNELS, getContext().getString(R.string.header_blocked_channels), BrowseSection.TYPE_GRID, R.drawable.icon_blocked_channels, false));
@@ -212,7 +212,7 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
     }
 
     private void initRowAndGridMapping() {
-        mRowMapping.put(MediaGroup.TYPE_HOME, getContentService().getHomeObserve());
+        mRowMapping.put(MediaGroup.TYPE_HOME, getSignInService().isSigned() ? getContentService().getHomeObserve() : getContentService().getTrendingObserve()); // v33 anonymous public Home // v25 anonymous Home fallback // v35 signed-in personalized Home
         mRowMapping.put(MediaGroup.TYPE_TRENDING, getContentService().getTrendingObserve());
         mRowMapping.put(MediaGroup.TYPE_KIDS_HOME, getContentService().getKidsHomeObserve());
         mRowMapping.put(MediaGroup.TYPE_SPORTS, getContentService().getSportsObserve());
@@ -303,10 +303,15 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         getView().removeAllSections();
 
         int bootSectionId = getSidebarService().getBootSectionId();
+        if (!getSignInService().isSigned()) {
+            // v35: anonymous users start on public Home.
+            bootSectionId = MediaGroup.TYPE_HOME;
+        }
 
         // Empty Home on first run fix. Switch to something non-empty.
-        if (!getSignInService().isSigned() && VideoStateService.instance(getContext()).isEmpty()) {
-            bootSectionId = MediaGroup.TYPE_MUSIC;
+        if (!getSignInService().isSigned()) {
+            // v33: unsigned users start on public Home.
+            bootSectionId = MediaGroup.TYPE_HOME;
         }
 
         int index = 0;
@@ -643,7 +648,44 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         updateSection(mCurrentSection);
     }
 
+    private Observable<List<MediaGroup>> safeAnonymousRows(Observable<List<MediaGroup>> source) {
+        if (source == null) {
+            return Observable.empty();
+        }
+        return source
+                .onErrorResumeNext(Observable.<List<MediaGroup>>empty())
+                .filter(groups -> groups != null && !groups.isEmpty());
+    }
+
+    private Observable<List<MediaGroup>> getAnonymousHomeObserve() {
+        Observable<List<MediaGroup>> shortsFallback = getContentService().getShortsObserve()
+                .map(group -> group != null
+                        ? Collections.singletonList(group)
+                        : Collections.<MediaGroup>emptyList())
+                .onErrorResumeNext(Observable.<List<MediaGroup>>empty())
+                .filter(groups -> groups != null && !groups.isEmpty());
+
+        // v35: signed-out Home first tries public landscape rows. If YouTube refuses every one
+        // of those anonymous endpoints, use the same public Shorts feed that already works
+        // without an account instead of showing "Can't load content" / SIGN IN.
+        return Observable.concatArray(
+                safeAnonymousRows(getContentService().getGamingObserve()),
+                safeAnonymousRows(getContentService().getMusicObserve()),
+                safeAnonymousRows(getContentService().getSportsObserve()),
+                safeAnonymousRows(getContentService().getNewsObserve()),
+                safeAnonymousRows(getContentService().getKidsHomeObserve()),
+                safeAnonymousRows(getContentService().getLiveObserve()),
+                shortsFallback
+        ).take(1);
+    }
+
     private void updateSection(BrowseSection section) {
+        if (section.getId() == MediaGroup.TYPE_HOME && !getSignInService().isSigned()) {
+            // v35: anonymous public Home; signed-in Home still uses the personalized row mapping.
+            updateVideoRows(section, getAnonymousHomeObserve(), false);
+            updateRefreshTime();
+            return;
+        }
         switch (section.getType()) {
             case BrowseSection.TYPE_GRID:
             case BrowseSection.TYPE_SHORTS_GRID:
@@ -656,8 +698,12 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
                 }
                 break;
             case BrowseSection.TYPE_ROW:
-                Observable<List<MediaGroup>> groups = mRowMapping.get(section.getId());
-                updateVideoRows(section, groups, section.isAuthOnly());
+                Observable<List<MediaGroup>> groups =
+                        section.getId() == MediaGroup.TYPE_HOME && !getSignInService().isSigned()
+                                ? getContentService().getTrendingObserve()
+                                : mRowMapping.get(section.getId());
+                updateVideoRows(section, groups,
+                        section.getId() != MediaGroup.TYPE_HOME && section.isAuthOnly());
                 break;
             case BrowseSection.TYPE_SETTINGS_GRID:
                 Callable<List<SettingsItem>> items = mSettingsGridMapping.get(section.getId());
@@ -884,19 +930,13 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         }
 
         getView().showProgressBar(true);
-
         if (getSignInService().isSigned()) {
             callback.run();
         } else if (getView() != null) {
-            if (isHistorySection() && !VideoStateService.instance(getContext()).isEmpty()) {
-                getView().showProgressBar(false);
-                VideoGroup videoGroup = VideoGroup.from(getCurrentSection());
-                appendLocalHistory(videoGroup);
-                getView().updateSection(videoGroup);
-            } else {
-                getView().showProgressBar(false);
-                getView().showError(new SignInError(getContext()));
-            }
+            // v32: Channels, Subscriptions and History all use one consistent centered
+            // sign-in-required screen while anonymous. Home/public discovery stays usable.
+            getView().showProgressBar(false);
+            getView().showError(new SignInError(getContext()));
         }
     }
 
@@ -1189,7 +1229,7 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
             ErrorFragmentData errorFragmentData;
             if (error != null && !Helpers.containsAny(error.getMessage(), "fromNullable result is null")) {
                 errorFragmentData = new CategoryEmptyError(getContext(), error);
-            } else if (getSignInService().isSigned()) {
+            } else if (getSignInService().isSigned() || (mCurrentSection != null && !mCurrentSection.isAuthOnly())) { // v35 public anonymous sections
                 errorFragmentData = new CategoryEmptyError(getContext(), null);
             } else {
                 errorFragmentData = new SignInError(getContext());

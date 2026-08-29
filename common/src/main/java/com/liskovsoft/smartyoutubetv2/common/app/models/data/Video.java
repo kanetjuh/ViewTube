@@ -788,7 +788,7 @@ public final class Video {
             description = formatInfo.getDescription();
         }
 
-        // Published time used on live videos only
+        // time used on live videos only
         if (formatInfo.isLive()) {
             startTimeMs = formatInfo.getStartTimeMs() > 0 ? formatInfo.getStartTimeMs() : DateHelper.toUnixTimeMs(formatInfo.getStartTimestamp());
             startSegmentNum = formatInfo.getStartSegmentNum();

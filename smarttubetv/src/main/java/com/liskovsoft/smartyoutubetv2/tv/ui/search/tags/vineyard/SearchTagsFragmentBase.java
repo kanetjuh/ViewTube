@@ -62,7 +62,7 @@ public abstract class SearchTagsFragmentBase extends SearchSupportFragment
 
         mProgressBarManager = new ProgressBarManager();
         mResultsPresenter = new CustomListRowPresenter();
-        mResultsPresenter.enableChildRoundedCorners(getMainUIData().isUiTweakEnabled(MainUIData.UI_TWEAK_ROUNDED_CORNERS));
+        mResultsPresenter.enableChildRoundedCorners(false);
         mResultsAdapter = new ArrayObjectAdapter(mResultsPresenter);
         mTagsPresenter = new TagPresenter();
         mSearchTagsAdapter = new TagAdapter(getContext(), mTagsPresenter, "");

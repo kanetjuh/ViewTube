@@ -155,6 +155,21 @@ public class NavigateTitleView extends TitleView implements OnDataChange, Accoun
         // Keep the YouTube-style account + mic + search pill visible whenever the title itself is shown.
         mSearchOrbView.setVisibility(mSearchVisibility);
         mAccountView.setVisibility(mSearchVisibility);
+
+        // v22: keep account label visibility tied to Leanback title visibility.
+        // BrowseFragment controls the label width: width > 0 means the rail is expanded.
+        // When Leanback hides the title controls while scrolling down, hide the account
+        // name as well; when the title comes back, restore it only for an expanded rail.
+        if (mAccountLabel != null) {
+            // v25: an anonymous session has no channel name. Never resurrect the old
+            // "None" label just because the title/rail becomes visible again.
+            boolean hasAccountName = mAccountLabel.length() > 0;
+            boolean showAccountLabel = hasAccountName &&
+                    mSearchVisibility == View.VISIBLE && mAccountLabel.getWidth() > 0;
+            mAccountLabel.setVisibility(showAccountLabel ? View.VISIBLE : View.INVISIBLE);
+            mAccountLabel.setAlpha(showAccountLabel ? 1f : 0f);
+        }
+
         if (mSearchPill != null) {
             mSearchPill.setVisibility(mSearchVisibility);
         }
@@ -206,7 +221,16 @@ public class NavigateTitleView extends TitleView implements OnDataChange, Accoun
             AccountSettingsPresenter.instance(getContext()).show();
             return true;
         });
-        TooltipCompatHandler.setTooltipText(mAccountView, getContext().getString(R.string.settings_accounts));
+        // v26: the expanded sidebar already shows the account name. Disable the stock
+        // tooltip bubble and make the focused avatar free to zoom outside its own bounds.
+        makeAccountOrbOverflowSafe();
+        // v28: Leanback's stock orb/shadow is 52dp and zooms to 120% on focus, while our
+        // account artwork is much smaller. Scale ONLY the orb/shadow surface so the focus
+        // flash follows the actual avatar instead of drawing a huge halo around it.
+        mAccountView.setOrbVisualScale(0.64f);
+        // The compact avatar is visually left of Leanback's stock orb centre. Shift only the
+        // focus/background circle left; the profile artwork itself stays exactly where it is.
+        mAccountView.setOrbVisualOffsetXDp(-6f);
 
         mLanguageView = findViewById(R.id.language_orb);
         mLanguageView.setOnOrbClickedListener(v -> LanguageSettingsPresenter.instance(getContext()).show());
@@ -289,29 +313,73 @@ public class NavigateTitleView extends TitleView implements OnDataChange, Accoun
     }
 
     private void updateAccountIcon() {
-        if (!mIsAccountViewEnabled) {
+        // v32: delayed account refreshes may fire while the title view is being detached/rebuilt.
+        // Never touch the orb in that transient state.
+        if (!mIsAccountViewEnabled || mAccountView == null || getWindowToken() == null) {
             return;
         }
 
         Account current = MediaServiceManager.instance().getSelectedAccount();
 
-        if (current != null && current.getAvatarImageUrl() != null) {
-            loadIcon(mAccountView, current.getAvatarImageUrl(), false);
+        if (current != null) {
+            if (current.getAvatarImageUrl() != null) {
+                loadIcon(mAccountView, current.getAvatarImageUrl(), false);
+            } else {
+                mAccountView.setOrbColors(new Colors(
+                    Color.rgb(36, 36, 36), Color.rgb(48, 48, 48), Color.WHITE));
+            mAccountView.setOrbIcon(ContextCompat.getDrawable(getContext(), R.drawable.browse_title_account));
+            }
+
             String accountName = current.getName() != null ? current.getName() : current.getEmail();
-            //TooltipCompatHandler.setTooltipText(mAccountView, Utils.updateTooltip(getContext(), accountName));
-            TooltipCompatHandler.setTooltipText(mAccountView, accountName);
             if (mAccountLabel != null) {
                 mAccountLabel.setText(accountName != null ? accountName : "");
             }
         } else {
-            Colors orbColors = mAccountView.getOrbColors();
-            mAccountView.setOrbColors(new Colors(orbColors.color, orbColors.brightColor, ContextCompat.getColor(getContext(), R.color.orb_icon_color)));
+            // v25 anonymous state: keep the account button in the exact same slot so the
+            // title bar geometry does not jump, but do not render a fake channel named "None".
+            // v32: signed-out state must keep the exact same circular account slot as a real
+            // avatar. A transparent stock orb made the person glyph float by itself and changed
+            // the perceived top-bar layout.
+            mAccountView.setOrbColors(new Colors(0xFF272727, 0xFF333333,
+                    ContextCompat.getColor(getContext(), R.color.orb_icon_color)));
             mAccountView.setOrbIcon(ContextCompat.getDrawable(getContext(), R.drawable.browse_title_account));
-            String noAccount = getContext().getString(R.string.dialog_account_none);
-            TooltipCompatHandler.setTooltipText(mAccountView, noAccount);
             if (mAccountLabel != null) {
-                mAccountLabel.setText(noAccount);
+                mAccountLabel.animate().cancel();
+                mAccountLabel.setText("");
+                mAccountLabel.setAlpha(0f);
+                mAccountLabel.setVisibility(View.GONE);
+                android.view.ViewGroup.LayoutParams params = mAccountLabel.getLayoutParams();
+                if (params != null && params.width != 0) {
+                    params.width = 0;
+                    mAccountLabel.setLayoutParams(params);
+                }
             }
+        }
+    }
+
+    /**
+     * SearchOrbView zooms its internal circle on focus. The account orb sits against the left
+     * edge of the 64dp rail, so stock clipping can shave off that focus circle. Disable clipping
+     * through the nearby title hierarchy and lift the orb above its siblings.
+     */
+    private void makeAccountOrbOverflowSafe() {
+        if (mAccountView == null) {
+            return;
+        }
+
+        mAccountView.setClipChildren(false);
+        mAccountView.setClipToPadding(false);
+        mAccountView.setClipToOutline(false);
+        mAccountView.setTranslationZ(8f);
+
+        android.view.ViewParent parent = mAccountView.getParent();
+        int levels = 0;
+        while (parent instanceof android.view.ViewGroup && levels < 5) {
+            android.view.ViewGroup group = (android.view.ViewGroup) parent;
+            group.setClipChildren(false);
+            group.setClipToPadding(false);
+            parent = group.getParent();
+            levels++;
         }
     }
 
@@ -329,13 +397,18 @@ public class NavigateTitleView extends TitleView implements OnDataChange, Accoun
     }
 
     private void loadIcon(SearchOrbView view, String url, boolean useCache) {
-        if (view == null) {
+        if (view == null || view.getWindowToken() == null) {
             return;
         }
 
-        // The view with GONE visibility has zero width and height
+        // The view with GONE visibility has zero width and height. Retry only while attached;
+        // otherwise a stale title view could keep rescheduling itself after account/layout swaps.
         if (view.getWidth() <= 0 || view.getHeight() <= 0) {
-            Utils.postDelayed(() -> loadIcon(view, url, useCache), 500);
+            Utils.postDelayed(() -> {
+                if (view.getWindowToken() != null) {
+                    loadIcon(view, url, useCache);
+                }
+            }, 500);
             return;
         }
 

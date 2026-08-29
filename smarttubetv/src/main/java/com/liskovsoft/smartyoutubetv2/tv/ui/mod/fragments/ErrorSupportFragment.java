@@ -17,6 +17,7 @@ import android.graphics.Paint;
 import android.graphics.Paint.FontMetricsInt;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.LayoutInflater;
@@ -27,6 +28,7 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import androidx.leanback.R;
 import androidx.leanback.app.BrandedSupportFragment;
+import androidx.leanback.app.BrowseSupportFragment;
 
 /**
  * A fragment for displaying an error indication.
@@ -160,9 +162,16 @@ public class ErrorSupportFragment extends BrandedSupportFragment {
         View root = inflater.inflate(R.layout.lb_error_fragment, container, false);
 
         mErrorFrame = (ViewGroup) root.findViewById(R.id.error_frame);
+
+        // v34: error/empty states use the same #0F0F0F surface as Browse and the navigation rail.
+        setBackgroundDrawable(new ColorDrawable(0xFF0F0F0F));
         updateBackground();
 
-        installTitleView(inflater, mErrorFrame, savedInstanceState);
+        // BrowseSupportFragment already owns the account/mic/Search title. Installing a second
+        // BrandedSupportFragment title here caused the duplicate/overlapping logged-out topbar.
+        if (!(getParentFragment() instanceof BrowseSupportFragment)) {
+            installTitleView(inflater, mErrorFrame, savedInstanceState);
+        }
 
         mImageView = (ImageView) root.findViewById(R.id.image);
         updateImageDrawable();

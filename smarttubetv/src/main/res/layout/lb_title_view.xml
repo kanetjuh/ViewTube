@@ -21,17 +21,31 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <com.liskovsoft.smartyoutubetv2.tv.ui.widgets.search.LongClickSearchOrbView
-                android:id="@+id/account_orb"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:nextFocusRight="@id/title_orb"
-                android:transitionGroup="true"
-                android:visibility="visible"
-                app:searchOrbBrightColor="@color/yt_top_control_focused"
-                app:searchOrbColor="@color/yt_top_control_bg"
-                app:searchOrbIcon="@drawable/browse_title_account"
-                app:searchOrbIconColor="@color/orb_icon_color" />
+            <!--
+              Keep the functional account SearchOrbView, but make its orb background transparent.
+              The avatar/account drawable itself then renders at the same visual scale as the
+              side-rail glyphs instead of becoming a tiny icon inside a second grey orb.
+            -->
+            <FrameLayout
+                android:id="@+id/yt_account_orb_slot"
+                android:layout_width="32dp"
+                android:layout_height="56dp"
+                android:clipChildren="false"
+                android:clipToPadding="false">
+
+                <com.liskovsoft.smartyoutubetv2.tv.ui.widgets.search.LongClickSearchOrbView
+                    android:id="@+id/account_orb"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:nextFocusRight="@id/title_orb"
+                    android:transitionGroup="true"
+                    android:visibility="visible"
+                    app:searchOrbBrightColor="@android:color/transparent"
+                    app:searchOrbColor="@android:color/transparent"
+                    app:searchOrbIcon="@drawable/browse_title_account"
+                    app:searchOrbIconColor="@color/orb_icon_color" />
+            </FrameLayout>
 
             <TextView
                 android:id="@+id/yt_account_label"
