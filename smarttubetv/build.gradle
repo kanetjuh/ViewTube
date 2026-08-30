@@ -30,13 +30,16 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
-// The first letter of the flavor name must be in uppercase
-if (new File("${projectDir}/google-services.json").exists() && (getGradle().getStartParameter().getTaskRequests().toString().contains("Stbeta") ||
-        getGradle().getStartParameter().getTaskRequests().toString().contains("Ststable"))) {
-    // Google Services Gradle plugin (transforms google-services.json file)
-    apply plugin: 'com.google.gms.google-services'
+// Upstream SmartTube Firebase configuration is kept for attribution/upstream parity,
+// but it targets the original SmartTube application IDs.
+// ViewTube uses com.kanetjuh.viewtube, so Google Services processing is disabled.
+def enableUpstreamSmartTubeFirebase = false
 
-    // Apply the Crashlytics Gradle plugin
+if (enableUpstreamSmartTubeFirebase &&
+        new File("${projectDir}/google-services.json").exists() &&
+        (getGradle().getStartParameter().getTaskRequests().toString().contains("Stbeta") ||
+         getGradle().getStartParameter().getTaskRequests().toString().contains("Ststable"))) {
+    apply plugin: 'com.google.gms.google-services'
     apply plugin: 'com.google.firebase.crashlytics'
 }
 
@@ -57,8 +60,8 @@ android {
         applicationId "com.kanetjuh.viewtube"
         minSdkVersion project.properties.minSdkVersion
         targetSdkVersion project.properties.targetSdkVersion
-        versionCode 10000
-        versionName "1.0.0"
+        versionCode 10001
+        versionName "1.0.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "long", "TIMESTAMP", System.currentTimeMillis() + "L"
 
