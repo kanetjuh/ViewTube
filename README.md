@@ -1,5 +1,7 @@
 <!-- [<img src="images/badge_fdroid.png" alt="Get it on F-Droid" height="80">](https://f-droid.org/packages/app.ViewTube.fdroid/) -->
 [<img src="images/badge_github.png" alt="Get it on GitHub" height="80">](https://github.com/kanetjuh/viewtubereleases)
+[<img src="https://github.com/user-attachments/assets/8aaa9d50-fd40-4e5f-a0e2-5d9eb4a21da8" alt="Get it on AFTV" height="80">](http://aftv.news/5856486)
+
 
 # Important announcement about the app
 
