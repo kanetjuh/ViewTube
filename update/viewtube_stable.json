@@ -18,12 +18,12 @@
     ]
   },
   "1.0.0": {
-    "versionCode": 1,
+    "versionCode": 10000,
     "changelog": [
-      "ViewTube 1.0.0"
+      "First ViewTube release"
     ],
     "changelog_nl": [
-      "ViewTube 1.0.0"
+      "Eerste ViewTube release"
     ]
   }
 }
