@@ -50,6 +50,7 @@ public class YouTubeVideoCardView extends LinearLayout {
     private boolean mContentAllowed = true;
     private boolean mPreviewEnabled;
     private boolean mFocusedOrSelected;
+    private String mBoundVideoId;
 
     public YouTubeVideoCardView(Context context) {
         super(context);
@@ -141,6 +142,14 @@ public class YouTubeVideoCardView extends LinearLayout {
         mImageWrapper.setMainImageDimensions(width, height);
     }
 
+    public void bindVideoId(String videoId) {
+        mBoundVideoId = videoId;
+    }
+
+    public boolean isBoundTo(String videoId) {
+        return TextUtils.equals(mBoundVideoId, videoId);
+    }
+
     public void setTitleText(CharSequence title) {
         mTitle.setText(title);
     }
@@ -159,7 +168,10 @@ public class YouTubeVideoCardView extends LinearLayout {
 
     /**
      * Splits SmartTube's existing secondary title into the same visual hierarchy used by
-     * YouTube TV: channel on its own row, compact quality/caption chips and views/date after it.
+     * YouTube TV: channel on its own row, compact non-resolution chips and views/date after it.
+     *
+     * 2K/4K/8K are NOT trusted from browse text. Only qualityHint from
+     * YouTubeQualityResolver may create a resolution chip.
      */
     public void setMetadata(CharSequence secondTitle, String author) {
         setMetadata(secondTitle, author, null);
@@ -174,25 +186,42 @@ public class YouTubeVideoCardView extends LinearLayout {
 
         if (!TextUtils.isEmpty(source)) {
             String[] parts = source.split("\\s*" + META_DELIMITER + "\\s*");
+
             for (String raw : parts) {
                 String part = raw != null ? raw.trim() : "";
+
                 if (TextUtils.isEmpty(part)) {
                     continue;
                 }
 
-                if (isChip(part)) {
+                // Never trust a 2K/4K/8K/HD token from feed metadata.
+                if (isResolutionChip(part)) {
+                    continue;
+                }
+
+                if (isAuxiliaryChip(part)) {
                     if (chips.size() < 2) {
-                        chips.add(normalizeChip(part));
+                        chips.add(normalizeAuxiliaryChip(part));
                     }
                     continue;
                 }
 
-                // Some feeds prepend a quality label to a metadata part instead of separating it
-                // with a bullet, e.g. "4K 28K views". Pull that prefix into a chip too.
+                // Strip leading chip-like tokens from metadata such as
+                // "8K 28K views", while keeping "28K views".
                 String[] words = part.split("\\s+", 2);
-                if (words.length > 1 && isChip(words[0])) {
+
+                if (words.length > 1 && isResolutionChip(words[0])) {
+                    part = words[1].trim();
+
+                    if (isAuxiliaryChip(part)) {
+                        if (chips.size() < 2) {
+                            chips.add(normalizeAuxiliaryChip(part));
+                        }
+                        continue;
+                    }
+                } else if (words.length > 1 && isAuxiliaryChip(words[0])) {
                     if (chips.size() < 2) {
-                        chips.add(normalizeChip(words[0]));
+                        chips.add(normalizeAuxiliaryChip(words[0]));
                     }
                     part = words[1].trim();
                 }
@@ -211,22 +240,14 @@ public class YouTubeVideoCardView extends LinearLayout {
             cleanAuthor = metadataParts.remove(0);
         }
 
-        // If the feed parser kept the YouTube quality badge outside secondTitle, add the hint here.
-        // Avoid duplicates when the same 4K/8K token was already present in the metadata text.
-        if (!TextUtils.isEmpty(qualityHint)) {
-            String normalizedHint = normalizeChip(qualityHint);
-            boolean alreadyPresent = false;
-            for (String chip : chips) {
-                if (normalizedHint.equalsIgnoreCase(normalizeChip(chip))) {
-                    alreadyPresent = true;
-                    break;
-                }
-            }
-            if (!alreadyPresent) {
-                chips.add(0, normalizedHint);
-                if (chips.size() > 2) {
-                    chips.remove(chips.size() - 1);
-                }
+        // The ONLY source of 2K/4K/8K.
+        String realResolution = normalizeResolutionChip(qualityHint);
+
+        if (!TextUtils.isEmpty(realResolution)) {
+            chips.add(0, realResolution);
+
+            while (chips.size() > 2) {
+                chips.remove(chips.size() - 1);
             }
         }
 
@@ -242,7 +263,9 @@ public class YouTubeVideoCardView extends LinearLayout {
 
         boolean hasMetadata = mChipOne.getVisibility() == VISIBLE ||
                 mChipTwo.getVisibility() == VISIBLE || mMetadata.getVisibility() == VISIBLE;
+
         mMetadataRow.setVisibility(mContentAllowed && hasMetadata ? VISIBLE : GONE);
+
         if (!mContentAllowed) {
             mAuthor.setVisibility(GONE);
         }
@@ -258,19 +281,76 @@ public class YouTubeVideoCardView extends LinearLayout {
         }
     }
 
-    private boolean isChip(String text) {
+    private boolean isResolutionChip(String text) {
+        if (TextUtils.isEmpty(text)) {
+            return false;
+        }
+
         String value = text.toUpperCase(Locale.US).replace(" ", "");
-        return value.equals("4K") || value.equals("8K") || value.equals("HD") ||
-                value.equals("HDR") || value.equals("CC") || value.equals("60FPS") ||
-                value.equals("1080P") || value.equals("2160P");
+
+        return value.equals("8K") ||
+                value.equals("4320P") ||
+                value.equals("7680X4320") ||
+                value.equals("4K") ||
+                value.equals("2160P") ||
+                value.equals("3840X2160") ||
+                value.equals("UHD") ||
+                value.equals("2K") ||
+                value.equals("1440P") ||
+                value.equals("2560X1440") ||
+                value.equals("QHD") ||
+                value.equals("HD") ||
+                value.equals("1080P");
     }
 
-    private String normalizeChip(String text) {
+    private boolean isAuxiliaryChip(String text) {
+        if (TextUtils.isEmpty(text)) {
+            return false;
+        }
+
         String value = text.toUpperCase(Locale.US).replace(" ", "");
-        if (value.equals("2160P")) {
+
+        return value.equals("HDR") ||
+                value.equals("CC") ||
+                value.equals("60FPS");
+    }
+
+    private String normalizeAuxiliaryChip(String text) {
+        if (TextUtils.isEmpty(text)) {
+            return null;
+        }
+
+        return text.toUpperCase(Locale.US).replace(" ", "");
+    }
+
+    private String normalizeResolutionChip(String text) {
+        if (TextUtils.isEmpty(text)) {
+            return null;
+        }
+
+        String value = text.toUpperCase(Locale.US).replace(" ", "");
+
+        if (value.equals("8K") ||
+                value.equals("4320P") ||
+                value.equals("7680X4320")) {
+            return "8K";
+        }
+
+        if (value.equals("4K") ||
+                value.equals("2160P") ||
+                value.equals("3840X2160") ||
+                value.equals("UHD")) {
             return "4K";
         }
-        return value;
+
+        if (value.equals("2K") ||
+                value.equals("1440P") ||
+                value.equals("2560X1440") ||
+                value.equals("QHD")) {
+            return "2K";
+        }
+
+        return null;
     }
 
     private String joinMetadata(List<String> parts) {
@@ -279,15 +359,17 @@ public class YouTubeVideoCardView extends LinearLayout {
         }
 
         StringBuilder result = new StringBuilder();
+
         for (String part : parts) {
             if (result.length() > 0) {
                 result.append(" ").append(META_DELIMITER).append(" ");
             }
+
             result.append(part);
         }
+
         return result.toString();
     }
-
 
     public void setDurationText(CharSequence duration, boolean live) {
         if (mDuration == null) {
@@ -375,6 +457,7 @@ public class YouTubeVideoCardView extends LinearLayout {
         if (mFocusedOrSelected == focused && mThumbnailShell.getBackground() != null) {
             return;
         }
+
         mFocusedOrSelected = focused;
 
         int stroke = dp(3);

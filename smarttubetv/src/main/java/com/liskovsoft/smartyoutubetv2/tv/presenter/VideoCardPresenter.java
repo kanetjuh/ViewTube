@@ -24,6 +24,7 @@ import com.liskovsoft.smartyoutubetv2.common.utils.ClickbaitRemover;
 import com.liskovsoft.smartyoutubetv2.tv.R;
 import com.liskovsoft.smartyoutubetv2.tv.presenter.base.LongClickPresenter;
 import com.liskovsoft.smartyoutubetv2.tv.ui.browse.video.GridFragmentHelper;
+import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.youtube.YouTubeQualityResolver;
 import com.liskovsoft.smartyoutubetv2.tv.ui.widgets.youtube.YouTubeVideoCardView;
 import com.liskovsoft.smartyoutubetv2.tv.util.ViewUtil;
 
@@ -66,8 +67,31 @@ public class VideoCardPresenter extends LongClickPresenter {
         YouTubeVideoCardView cardView = (YouTubeVideoCardView) viewHolder.view;
         Context context = cardView.getContext();
 
+        final String boundVideoId = video.videoId;
+        final CharSequence boundSecondTitle = video.getSecondTitle();
+        final String boundAuthor = video.getAuthor();
+
+        cardView.bindVideoId(boundVideoId);
         cardView.setTitleText(video.getTitle());
-        cardView.setMetadata(video.getSecondTitle(), video.getAuthor(), getQualityHint(video));
+
+        // Never guess 2K/4K/8K from the title, badge or browse metadata.
+        // The resolution chip is added only after MediaServiceCore returns
+        // the actual available stream formats for this video.
+        cardView.setMetadata(boundSecondTitle, boundAuthor, null);
+
+        YouTubeQualityResolver.resolve(video, quality ->
+                cardView.post(() -> {
+                    // Leanback can recycle this view while the format request
+                    // is still running. Do not put a result on the wrong card.
+                    if (cardView.isBoundTo(boundVideoId)) {
+                        cardView.setMetadata(
+                                boundSecondTitle,
+                                boundAuthor,
+                                quality
+                        );
+                    }
+                }));
+
         cardView.setTitleVisible(isTitleEnabled());
         cardView.setContentVisible(isContentEnabled());
 
@@ -125,57 +149,10 @@ public class VideoCardPresenter extends LongClickPresenter {
         super.onUnbindViewHolder(viewHolder);
 
         YouTubeVideoCardView cardView = (YouTubeVideoCardView) viewHolder.view;
+        cardView.bindVideoId(null);
         cardView.stopPreview(true);
         Glide.with(cardView.getContext().getApplicationContext()).clear(cardView.getMainImageView());
         cardView.getMainImageView().setImageDrawable(null);
-    }
-
-
-    /**
-     * The current TV feed sometimes exposes the 4K/8K label separately from SmartTube's
-     * secondTitle, so the custom card never sees it. Preserve any quality token that did make it
-     * into the model and use a conservative title fallback (e.g. "4K", "2160p", "8K").
-     * Duration strings such as 26:51 are deliberately ignored.
-     */
-    private String getQualityHint(Video video) {
-        if (video == null) {
-            return null;
-        }
-
-        String quality = extractQualityToken(video.badge);
-        if (quality != null) {
-            return quality;
-        }
-
-        quality = extractQualityToken(video.getSecondTitle() != null ? video.getSecondTitle().toString() : null);
-        if (quality != null) {
-            return quality;
-        }
-
-        return extractQualityToken(video.getTitle());
-    }
-
-    private String extractQualityToken(String text) {
-        if (text == null) {
-            return null;
-        }
-
-        String value = text.toUpperCase(java.util.Locale.US);
-
-        if (value.matches(".*(^|[^A-Z0-9])(?:8K|4320P)([^A-Z0-9]|$).*")) {
-            return "8K";
-        }
-        if (value.matches(".*(^|[^A-Z0-9])(?:4K|2160P|UHD)([^A-Z0-9]|$).*")) {
-            return "4K";
-        }
-        if (value.matches(".*(^|[^A-Z0-9])HDR([^A-Z0-9]|$).*")) {
-            return "HDR";
-        }
-        if (value.matches(".*(^|[^A-Z0-9])60FPS([^A-Z0-9]|$).*")) {
-            return "60FPS";
-        }
-
-        return null;
     }
 
     private void updateDimensions(Context context) {
