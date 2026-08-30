@@ -17,50 +17,13 @@
       "https://github.com/kanetjuh/ViewTube/releases/download/v1.0.2/ViewTube_stable_1.0.2_universal.apk"
     ]
   },
-  "1.0.1": {
-    "versionCode": 10001,
-    "changelog": [
-      "New ViewTube application icon",
-      "New Android TV launcher artwork",
-      "Updated Android TV banner",
-      "Updated ViewTube logo inside the application",
-      "Updated stable flavor resources",
-      "Fixed release builds for `com.kanetjuh.viewtube`",
-      "Upstream SmartTube Firebase configuration remains in the source tree",
-      "Google Services processing is disabled because the upstream Firebase clients target the original SmartTube package IDs",
-      "ARM64",
-      "ARMv7",
-      "x86",
-      "Universal APK",
-      "Branding tested on Android TV emulator",
-      "Clean stable release build completed successfully",
-      "Existing SmartTube core functionality preserved"
-    ],
-    "changelog_nl": [
-      "New ViewTube application icon",
-      "New Android TV launcher artwork",
-      "Updated Android TV banner",
-      "Updated ViewTube logo inside the application",
-      "Updated stable flavor resources",
-      "Fixed release builds for `com.kanetjuh.viewtube`",
-      "Upstream SmartTube Firebase configuration remains in the source tree",
-      "Google Services processing is disabled because the upstream Firebase clients target the original SmartTube package IDs",
-      "ARM64",
-      "ARMv7",
-      "x86",
-      "Universal APK",
-      "Branding tested on Android TV emulator",
-      "Clean stable release build completed successfully",
-      "Existing SmartTube core functionality preserved"
-    ]
-  },
   "1.0.2": {
     "versionCode": 10002,
     "changelog": [
-      "Fixed the video quality checker to detect the actual available video quality from 2K through 8K"
+      "ViewTube 1.0.2"
     ],
     "changelog_nl": [
-      "Video quality checker gefixt zodat de daadwerkelijke beschikbare videokwaliteit van 2K tot en met 8K wordt gedetecteerd"
+      "ViewTube 1.0.2"
     ]
   }
 }
