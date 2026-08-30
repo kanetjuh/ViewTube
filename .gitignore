@@ -70,3 +70,15 @@ tmp/
 fabric.properties
 *BAK.java
 hs_err_pid*.log
+
+# ViewTube signing
+keystore.properties
+smarttubetv/viewtube-release.jks
+
+# ViewTube signing
+keystore.properties
+smarttubetv/viewtube-release.jks
+
+# Old SmartTube Firebase config
+google-services.json.smarttube-backup
+smarttubetv/google-services.json.smarttube-backup
